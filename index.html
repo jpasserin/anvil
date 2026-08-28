@@ -198,7 +198,9 @@
   @keyframes up{from{transform:translateY(100%)}to{transform:none}}
 
   /* ---- modals (bottom sheets) ---- */
-  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;justify-content:center;z-index:45;}
+  /* above .fpage (55) — sheets are opened FROM the exercise page, so they must
+     sit on top of it, not behind */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;justify-content:center;z-index:60;}
   .modal.show{display:flex;}
   .modal .sheet{background:var(--card);border:1px solid var(--line);border-radius:20px 20px 0 0;
     width:100%;max-width:560px;padding:22px 18px calc(22px + env(safe-area-inset-bottom));
@@ -302,7 +304,7 @@
     </div>
 
     <div class="card">
-      <h2>Today</h2>
+      <h2>Today <span class="act" id="editToday">✎ enter minutes</span></h2>
       <div class="bigtoday">
         <div class="num" id="todayNum">0</div>
         <div class="unit" id="todayUnit">minutes</div>
@@ -523,7 +525,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "2";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "3";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 2;
 const LSKEY = "anvil.db";
 
@@ -1004,6 +1006,46 @@ function heatLevel(secs, dayTargetMin) {
   if (m < t * 2) return 3;
   return 4;
 }
+/* ---- editing what's already logged ---- */
+// Move a session to another day, keeping its time of day.
+function moveLogToDate(l, newKey) {
+  if (!newKey || l.date === newKey) return;
+  const old = new Date(l.ts), d = fromYmd(newKey);
+  d.setHours(old.getHours(), old.getMinutes(), old.getSeconds(), 0);
+  l.date = newKey; l.ts = d.getTime();
+}
+// Reconcile a whole day from the day editor. Each row is {exId, mins} and the
+// value is the TOTAL for that exercise on that day:
+//   unchanged            → the day's sessions are left exactly as they are
+//   0                    → every session for that exercise that day is removed
+//   changed, 1 session   → that session's duration is edited in place
+//   changed, 2+ sessions → they collapse into one entry (the row warns first)
+function applyDayEdit(dateKey, rows, mkId) {
+  const out = { set: 0, cleared: 0, merged: 0 };
+  rows.forEach((r, i) => {
+    const ex = DB.exercises.find(e => e.id === r.exId);
+    if (!ex) return;
+    const existing = DB.logs.filter(l => l.date === dateKey && l.exId === r.exId);
+    const cur = existing.reduce((s, l) => s + (l.secs || 0), 0);
+    const want = Math.max(0, Math.round(r.mins || 0)) * 60;
+    if (want === cur) return;                                   // untouched
+    if (want === 0) {
+      DB.logs = DB.logs.filter(l => !(l.date === dateKey && l.exId === r.exId));
+      out.cleared++; return;
+    }
+    if (existing.length === 1) { existing[0].secs = want; out.set++; return; }
+    if (existing.length > 1) {
+      DB.logs = DB.logs.filter(l => !(l.date === dateKey && l.exId === r.exId));
+      out.merged++;
+    } else out.set++;
+    const at = fromYmd(dateKey), now = new Date();
+    if (dateKey === todayStr()) at.setHours(now.getHours(), now.getMinutes(), 0, 0);
+    else at.setHours(12, 0, 0, 0);                              // a past day gets a neutral midday stamp
+    DB.logs.push({ id: mkId("lg"), exId: ex.id, name: ex.name, cat: ex.cat, art: ex.art,
+      date: dateKey, ts: at.getTime() + i * 60000, secs: want, reps: 0, note: "" });
+  });
+  return out;
+}
 function niceMax(v) {
   if (v <= 0) return 10;
   const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1080, 1440, 2160, 2880];
@@ -1283,19 +1325,138 @@ function logLine(l) {
     <span class="dot" style="background:${catColor(l.cat)}"></span>
     <div style="flex:1;min-width:0"><div class="t">${esc(l.name)}</div><div class="s">${time}</div></div>
     <div class="r">${mmss(l.secs)}</div>
-    <button class="chip" data-dellog="${l.id}" aria-label="Delete">✕</button>
+    <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button>
   </div>`;
 }
 function bindLogLines(root) {
   if (!root) return;
-  root.querySelectorAll("[data-dellog]").forEach(b => b.onclick = ev => {
-    ev.stopPropagation();
-    const l = DB.logs.find(x => x.id === b.dataset.dellog);
-    if (!l || !confirm(`Delete ${l.name} (${mmss(l.secs)})?`)) return;
-    deleteLog(l.id); renderAll(); toast("Deleted");
+  root.querySelectorAll("[data-editlog]").forEach(b => b.onclick = ev => {
+    ev.stopPropagation(); editLog(b.dataset.editlog);
   });
   root.querySelectorAll("[data-openex]").forEach(r => r.onclick = () => {
     if (exById(r.dataset.openex)) openExercise(r.dataset.openex);
+  });
+}
+// after any edit, refresh whatever happens to be on screen
+function refreshAfterLogChange() {
+  renderAll();
+  if (exViewId) paintExercise();
+  if ($("dayModal").classList.contains("show") && dmKey) openDay(dmKey);
+}
+
+/* ---------- edit one logged session ---------- */
+function editLog(id) {
+  const l = DB.logs.find(x => x.id === id);
+  if (!l) return;
+  openSheet(`
+    <h3>${esc(l.name)}</h3>
+    <div class="hint" style="margin-top:0">Logged ${new Date(l.ts).toLocaleString(undefined,
+      { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+    <div class="btnrow" style="margin-top:14px">
+      <div class="field" style="flex:1"><label for="elMin">Minutes</label>
+        <input type="number" id="elMin" min="0" max="600" value="${Math.floor(l.secs / 60)}"></div>
+      <div class="field" style="flex:1"><label for="elSec">Seconds</label>
+        <input type="number" id="elSec" min="0" max="59" value="${l.secs % 60}"></div>
+    </div>
+    <div class="field"><label for="elDate">Date</label>
+      <input type="date" id="elDate" value="${l.date}" max="${todayStr()}"></div>
+    <div class="btnrow">
+      <button class="btn sec" id="elCancel">Cancel</button>
+      <button class="btn" id="elSave">Save</button>
+    </div>
+    <button class="btn danger" id="elDel" style="margin-top:8px">Delete this session</button>`, () => {
+    $("elCancel").onclick = closeSheet;
+    $("elSave").onclick = () => {
+      const secs = (+$("elMin").value || 0) * 60 + (+$("elSec").value || 0);
+      if (secs < 1) { toast("Duration has to be more than zero", "err"); return; }
+      l.secs = secs;
+      moveLogToDate(l, $("elDate").value);
+      save(true); closeSheet(); refreshAfterLogChange(); toast("Saved");
+    };
+    $("elDel").onclick = () => {
+      if (!confirm(`Delete ${l.name} (${mmss(l.secs)})?`)) return;
+      deleteLog(l.id); closeSheet(); refreshAfterLogChange(); toast("Deleted");
+    };
+  });
+}
+
+/* ---------- fill in a whole day at once ---------- */
+function openDayEdit(k) {
+  const sessionsFor = id => DB.logs.filter(l => l.date === k && l.exId === id);
+  const totals = new Map();
+  logsOn(k).forEach(l => totals.set(l.exId, (totals.get(l.exId) || 0) + l.secs));
+
+  // rows: whatever's already logged that day, then the exercises you actually use
+  const ids = [];
+  logsOn(k).forEach(l => { if (exById(l.exId) && ids.indexOf(l.exId) < 0) ids.push(l.exId); });
+  routineExercises().list.forEach(e => { if (ids.indexOf(e.id) < 0) ids.push(e.id); });
+  let rows = ids.map(id => ({ exId: id, mins: Math.round((totals.get(id) || 0) / 60) }));
+
+  const isToday = k === todayStr();
+  openSheet(`
+    <h3>${isToday ? "Today" : fromYmd(k).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h3>
+    <div class="hint" style="margin-top:0">Minutes per exercise for this day. Leave a row at 0 to skip it.</div>
+    <div id="deRows" style="margin-top:10px"></div>
+    <div class="field" style="margin-top:12px"><label for="deAdd">Add another exercise</label>
+      <select id="deAdd"><option value="">— pick —</option></select></div>
+    <div class="hint" id="deTotal" style="text-align:center"></div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn sec" id="deCancel">Cancel</button>
+      <button class="btn" id="deSave">Save day</button>
+    </div>`, () => {
+    const harvest = () => $("deRows").querySelectorAll("[data-row]").forEach(inp => {
+      rows[+inp.dataset.row].mins = Math.max(0, +inp.value || 0);
+    });
+    const paint = () => {
+      $("deRows").innerHTML = rows.map((r, i) => {
+        const e = exById(r.exId); if (!e) return "";
+        const n = sessionsFor(r.exId).length;
+        return `<div class="exrow" style="cursor:default">
+          <div class="arttile" style="color:${catColor(e.cat)}">${art(e.art)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="t">${esc(e.name)}</div>
+            <div class="s">${esc(catName(e.cat))}${n > 1 ? ` · <span style="color:var(--warn)">${n} sessions — editing merges them</span>` : ""}</div>
+          </div>
+          <input type="number" data-row="${i}" min="0" max="600" value="${r.mins}" inputmode="numeric"
+            style="width:74px;flex:0 0 auto;text-align:center;padding:9px 6px">
+          <span class="s" style="flex:0 0 auto">min</span>
+        </div>`;
+      }).join("");
+      const tot = rows.reduce((s, r) => s + (r.mins || 0), 0);
+      $("deTotal").textContent = `${tot} minutes across ${rows.filter(r => r.mins > 0).length} exercise(s)`;
+      $("deRows").querySelectorAll("[data-row]").forEach(inp => inp.oninput = () => {
+        harvest();
+        const t = rows.reduce((s, r) => s + (r.mins || 0), 0);
+        $("deTotal").textContent = `${t} minutes across ${rows.filter(r => r.mins > 0).length} exercise(s)`;
+      });
+      // the picker only offers what isn't already a row
+      $("deAdd").innerHTML = `<option value="">— pick —</option>` + CATS.map(c => {
+        const opts = DB.exercises.filter(e => !e.arch && e.cat === c.id && !rows.some(r => r.exId === e.id))
+          .sort((a, b) => a.ord - b.ord)
+          .map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join("");
+        return opts ? `<optgroup label="${esc(c.name)}">${opts}</optgroup>` : "";
+      }).join("");
+    };
+    paint();
+    $("deAdd").onchange = () => {
+      if (!$("deAdd").value) return;
+      harvest();
+      rows.push({ exId: $("deAdd").value, mins: 0 });
+      paint();
+      const last = $("deRows").querySelector(`[data-row="${rows.length - 1}"]`);
+      if (last) { last.focus(); last.select(); }
+    };
+    $("deCancel").onclick = closeSheet;
+    $("deSave").onclick = () => {
+      harvest();
+      const res = applyDayEdit(k, rows, uid);
+      save(true); closeSheet(); refreshAfterLogChange();
+      const bits = [];
+      if (res.set) bits.push(`${res.set} updated`);
+      if (res.merged) bits.push(`${res.merged} merged`);
+      if (res.cleared) bits.push(`${res.cleared} cleared`);
+      toast(bits.length ? bits.join(" · ") : "No changes");
+    };
   });
 }
 
@@ -1447,15 +1608,19 @@ function renderCal() {
   $("calCats").innerHTML = catBreakdown(logsBetween(from, to));
 }
 
+let dmKey = null;
 function openDay(k) {
+  dmKey = k;
   const rows = logsOn(k).slice().sort((a, b) => a.ts - b.ts);
   $("dmTitle").textContent = fromYmd(k).toLocaleDateString(undefined,
     { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-  $("dmBody").innerHTML = rows.length
-    ? `<div class="hint" style="margin:0 0 8px">${minsOf(sumSecs(rows))} minutes · ${rows.length} exercise${rows.length === 1 ? "" : "s"}</div>`
+  $("dmBody").innerHTML = (rows.length
+    ? `<div class="hint" style="margin:0 0 8px">${minsOf(sumSecs(rows))} minutes · ${rows.length} session${rows.length === 1 ? "" : "s"}</div>`
       + rows.map(logLine).join("")
-    : `<div class="empty">Rest day.</div>`;
+    : `<div class="empty">Rest day.</div>`)
+    + `<button class="btn sec" id="dmEdit" style="margin-top:12px">${rows.length ? "Edit this day" : "Log this day"}</button>`;
   bindLogLines($("dmBody"));
+  $("dmEdit").onclick = () => { $("dayModal").classList.remove("show"); openDayEdit(k); };
   $("dayModal").classList.add("show");
 }
 
@@ -1705,7 +1870,7 @@ function paintExercise() {
             <div style="flex:1;min-width:0"><div class="t">${fromYmd(l.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
             <div class="s">${new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div></div>
             <div class="r" style="color:var(--txt);font-weight:700">${mmss(l.secs)}</div>
-            <button class="chip" data-dellog="${l.id}">✕</button></div>`).join("")
+            <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button></div>`).join("")
         : `<div class="empty">No sessions yet.</div>`}</div>
     </div>
 
@@ -1722,11 +1887,6 @@ function paintExercise() {
   $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
   $("evLogManual").onclick = () => manualLog(e.id);
   bindLogLines($("evLogs"));
-  $("evLogs").querySelectorAll("[data-dellog]").forEach(b => b.onclick = () => {
-    const l = DB.logs.find(x => x.id === b.dataset.dellog);
-    if (!l || !confirm(`Delete this ${mmss(l.secs)} session?`)) return;
-    deleteLog(l.id); paintExercise(); renderAll(); toast("Deleted");
-  });
 }
 
 /* ---------- STREAK CALENDAR ---------- */
@@ -2038,6 +2198,7 @@ function boot() {
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
   $("fab").onclick = () => editExercise(null);
   $("goExercises").onclick = () => showTab("ex");
+  $("editToday").onclick = () => openDayEdit(todayStr());
   $("newChain").onclick = () => editRoutine(null);
   $("exSearch").oninput = e => { exQuery = e.target.value; renderExList(); };
 
