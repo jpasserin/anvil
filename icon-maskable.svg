@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0d0f15"/>
+  <!-- same anvil, scaled into the 80% maskable safe zone -->
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <path fill="#3b82f6" d="M44 208
+      C78 180 116 172 152 172
+      L400 172 Q414 172 414 186
+      L414 226 Q414 240 400 240
+      L356 240 L332 302
+      L372 302 Q386 302 386 316
+      L386 348 Q386 362 372 362
+      L140 362 Q126 362 126 348
+      L126 316 Q126 302 140 302
+      L180 302 L156 240 L152 240
+      C116 240 78 236 44 216 Z"/>
+    <g fill="#fbbf24">
+      <rect x="240" y="96" width="26" height="58" rx="13"/>
+      <rect x="316" y="120" width="26" height="46" rx="13" transform="rotate(32 329 143)"/>
+      <rect x="164" y="120" width="26" height="46" rx="13" transform="rotate(-32 177 143)"/>
+    </g>
+  </g>
+</svg>
