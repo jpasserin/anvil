@@ -59,6 +59,7 @@
   .card h2 .act{text-transform:none;letter-spacing:0;font-weight:600;color:var(--accent2);cursor:pointer;font-size:12px;}
   .hint{font-size:12px;color:var(--muted);line-height:1.5;margin-top:8px;}
   .muted{color:var(--muted)}
+  .hide{display:none!important}
 
   /* ---- streaks ---- */
   .streaks3{display:flex;gap:8px;}
@@ -171,6 +172,23 @@
   .logtile .k{font-size:8.5px;line-height:1.35;color:var(--good);}
   .logtile .m{font-size:8px;line-height:1.35;color:var(--muted);}
   .logtile .m.dim{opacity:.45}
+
+  /* ---- achievements + tips ---- */
+  .badgegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .badge{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:9px 4px 7px;text-align:center;opacity:.55;}
+  .badge.on{opacity:1;background:var(--card2);border-color:var(--accent);}
+  .badge .bic{font-size:22px;line-height:1;filter:grayscale(1);}
+  .badge.on .bic{filter:none;}
+  .badge .bn{font-size:9px;font-weight:700;line-height:1.15;margin-top:4px;min-height:22px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+  .badge .bbar{height:3px;background:var(--line);border-radius:2px;margin:3px 4px 2px;overflow:hidden;}
+  .badge .bbar i{display:block;height:100%;background:var(--accent2);}
+  .badge .bp{font-size:8px;color:var(--muted);}
+  .badge .bp.done{color:var(--good);font-weight:700;}
+  .tip{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.45;}
+  .tip:last-child{border-bottom:none;}
+  .tip .ti{flex:0 0 auto;font-size:15px;line-height:1.3;}
+  .tip.good{color:var(--good)} .tip.warn{color:var(--warn)} .tip.info{color:var(--txt)}
 
   /* ---- body / weight ---- */
   .rangebtns{display:flex;gap:6px;margin-bottom:12px;}
@@ -318,6 +336,9 @@
     font-size:14px;opacity:0;pointer-events:none;transition:.3s;z-index:90;box-shadow:0 8px 30px rgba(0,0,0,.4);max-width:90%;text-align:center;}
   #toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   #toast.err{background:var(--bad);}
+  #toast.act{display:flex;align-items:center;gap:12px;pointer-events:auto;}
+  #toast.act button{background:rgba(0,0,0,.22);border:none;color:#06101c;font-weight:800;
+    font-size:13px;padding:6px 12px;border-radius:20px;cursor:pointer;}
 </style>
 </head>
 <body>
@@ -364,6 +385,16 @@
     <div class="card">
       <h2>Body <span class="act" id="goBody">weight &amp; BMI ›</span></h2>
       <div id="bodyCard"></div>
+    </div>
+
+    <div class="card" id="tipCard">
+      <h2>Suggestions <span class="act" id="goTips">more ›</span></h2>
+      <div id="tipsToday"></div>
+    </div>
+
+    <div class="card" id="reviewCard">
+      <h2>Last week <span class="act" id="goReview">history ›</span></h2>
+      <div id="reviewToday"></div>
     </div>
 
     <div class="card">
@@ -459,6 +490,21 @@
     <div class="card">
       <h2>Top exercises</h2>
       <div id="yrTop"></div>
+    </div>
+
+    <div class="card">
+      <h2>Last week</h2>
+      <div id="reviewHist"></div>
+    </div>
+
+    <div class="card">
+      <h2>Achievements</h2>
+      <div id="badgeBox"></div>
+    </div>
+
+    <div class="card">
+      <h2>Suggestions</h2>
+      <div id="tipsAll"></div>
     </div>
 
     <div class="card">
@@ -638,8 +684,8 @@
 
 <script>
 "use strict";
-const APP_VERSION = "6";          // keep equal to CACHE in sw.js; bump every change
-const SCHEMA_VERSION = 3;
+const APP_VERSION = "7";          // keep equal to CACHE in sw.js; bump every change
+const SCHEMA_VERSION = 4;
 const LSKEY = "anvil.db";
 
 /* =====================================================================
@@ -838,7 +884,7 @@ const uid = p => `${p}_${Date.now().toString(36)}_${(seq++).toString(36)}`;
 function seedExercises() {
   return DEFAULT_EXERCISES.map(([name, cat, dur, a, fav, met], i) =>
     ({ id: uid("ex"), name, cat, dur, art: a, fav: !!fav, ord: i, arch: false, note: "",
-       met, load: 0, rate: 0 }));
+       met, load: 0, rate: 0, sets: 1, setRest: 60 }));
 }
 function freshDB() {
   const ex = seedExercises();
@@ -857,6 +903,8 @@ function freshDB() {
         items: ["Plank", "Russian Twist", "Leg Raise", "Side Plank", "Superman"].map(pick).filter(Boolean) }
     ],
     weights: {},                         // "YYYY-MM-DD" -> kg (always kg; units are display-only)
+    waists: {},                          // "YYYY-MM-DD" -> cm (always cm)
+    badges: {},                          // achievement id -> ISO date first earned
     profile: Object.assign({}, DEF_PROFILE),
     settings: Object.assign({}, DEF_SETTINGS)
   };
@@ -872,6 +920,8 @@ function migrate(d) {
   d.routines = d.routines || [];
   d.weekGoals = d.weekGoals || {};                       // added in v2
   d.weights = d.weights || {};                           // added in v3
+  d.waists = d.waists || {};                             // added in v4
+  d.badges = d.badges || {};
   d.profile = Object.assign({}, DEF_PROFILE, d.profile || {});
   d.settings = Object.assign({}, DEF_SETTINGS, d.settings || {});
   d.exercises.forEach(e => {
@@ -881,6 +931,8 @@ function migrate(d) {
     if (!(e.met > 0)) e.met = DEF_MET_BY_NAME[e.name] || CAT_MET[e.cat] || 4;
     if (e.load == null) e.load = 0;
     if (e.rate == null) e.rate = 0;
+    if (!(e.sets > 0)) e.sets = 1;                       // v4: repeated sets with a rest between
+    if (!(e.setRest >= 0)) e.setRest = 60;
   });
   return d;
 }
@@ -943,6 +995,28 @@ function toast(msg, kind) {
   t.textContent = msg; t.className = "show" + (kind ? " " + kind : "");
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.className = (kind || ""), 2200);
+}
+/* A single level of undo for destructive edits. The DB is small enough that a
+   JSON snapshot is cheaper to reason about than a per-operation inverse. */
+let undoSnap = null;
+function snapshotForUndo(label) { undoSnap = { label, json: JSON.stringify(DB) }; }
+function offerUndo(msg) {
+  const t = $("toast");
+  t.className = "show act";
+  t.innerHTML = `<span>${esc(msg)}</span><button id="undoBtn">Undo</button>`;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.className = ""; t.textContent = ""; }, 7000);
+  $("undoBtn").onclick = () => {
+    if (!undoSnap) return;
+    DB = migrate(JSON.parse(undoSnap.json));
+    undoSnap = null;
+    save(true); renderAll();
+    if (exViewId) paintExercise();
+    if (bodyOpen) paintBody();
+    clearTimeout(toast._t);
+    t.className = ""; t.textContent = "";
+    toast("Undone");
+  };
 }
 
 /* ===================== sound + haptics ===================== */
@@ -1260,12 +1334,48 @@ function exerciseMet(e) {
 const kcalFrom = (secs, met, kg) => (secs > 0 && met > 0 && kg > 0) ? met * 3.5 * kg / 200 * (secs / 60) : 0;
 // A logged session freezes the MET it was recorded at, but uses the body weight
 // in force on its own date, so old entries stay truthful as you gain or lose.
+// A session logged before v3 has no frozen MET; fall back to the exercise's
+// current one rather than treating it as zero-intensity.
+const metOfLog = l => l.met > 0 ? l.met : exerciseMet(DB.exercises.find(e => e.id === l.exId));
 function kcalOfLog(l) {
-  const met = l.met > 0 ? l.met : exerciseMet(DB.exercises.find(e => e.id === l.exId));
-  return kcalFrom(l.secs, met, weightKgOn(l.date));
+  return kcalFrom(l.secs, metOfLog(l), weightKgOn(l.date));
 }
 const kcalOfLogs = rows => rows.reduce((s, l) => s + kcalOfLog(l), 0);
 const canEstimateKcal = () => latestWeightKg() > 0;
+
+/* ---- reps and volume ----
+   Anvil is timer-first by design, so reps are normally DERIVED: a minute at
+   60/min is 60 reps. Entering a real count on a session overrides the estimate.
+   Volume (reps × load) is the number that actually tracks strength progress —
+   minutes only track consistency. */
+function repsOf(l) {
+  if (l.reps > 0) return l.reps;
+  const ex = exById(l.exId);
+  const rate = l.rate > 0 ? l.rate : (ex && ex.rate > 0 ? ex.rate : 0);
+  return rate > 0 ? Math.round(rate * (l.secs || 0) / 60) : 0;
+}
+const repsAreEstimated = l => !(l.reps > 0) && repsOf(l) > 0;
+const volumeKgOf = l => repsOf(l) * (l.load || 0);
+const volumeOfLogs = rows => rows.reduce((s, l) => s + volumeKgOf(l), 0);
+
+/* ---- waist ----
+   Waist-to-height ratio beats BMI as a risk signal because BMI can't tell
+   muscle from fat. The rule of thumb is literally "keep your waist under half
+   your height". Boundaries below are the UK NICE / WHtR consensus bands. */
+function waistKeys() { return Object.keys(DB.waists || {}).sort(); }
+const latestWaistCm = () => { const k = waistKeys(); return k.length ? DB.waists[k[k.length - 1]] : 0; };
+const whtr = (waistCm, heightCm) => (waistCm > 0 && heightCm > 0) ? waistCm / heightCm : 0;
+function whtrBand(v) {
+  if (!v) return { label: "—", color: "var(--muted)" };
+  if (v < 0.4)  return { label: "low", color: "var(--warn)" };
+  if (v < 0.5)  return { label: "healthy", color: "var(--good)" };
+  if (v < 0.6)  return { label: "increased risk", color: "var(--warn)" };
+  return { label: "high risk", color: "var(--bad)" };
+}
+const toDisplayL = cm => isImperial() ? cm / 2.54 : cm;
+const fromDisplayL = v => isImperial() ? v * 2.54 : v;
+const lUnit = () => isImperial() ? "in" : "cm";
+const fmtL = cm => cm > 0 ? (Math.round(toDisplayL(cm) * 10) / 10).toFixed(1) + " " + lUnit() : "—";
 
 /* ---- editing what's already logged ---- */
 // Move a session to another day, keeping its time of day.
@@ -1308,6 +1418,186 @@ function applyDayEdit(dateKey, rows, mkId) {
   });
   return out;
 }
+/* =====================================================================
+   ACHIEVEMENTS
+   Every badge is computed from real logged data — nothing is granted, so
+   importing a backup or deleting sessions re-derives them honestly.
+   ===================================================================== */
+const BADGES = [
+  { id: "first",    ic: "🌱", name: "First rep",        desc: "Log your first session",            goal: 1,     val: b => b.sessions },
+  { id: "s50",      ic: "🏋️", name: "Fifty sessions",    desc: "50 sessions logged",                goal: 50,    val: b => b.sessions },
+  { id: "s250",     ic: "🏅", name: "Two-fifty",         desc: "250 sessions logged",               goal: 250,   val: b => b.sessions },
+  { id: "h1",       ic: "⏱️", name: "First hour",        desc: "1 hour of training",                goal: 60,    val: b => b.minutes },
+  { id: "h10",      ic: "⏳", name: "Ten hours",         desc: "10 hours of training",              goal: 600,   val: b => b.minutes },
+  { id: "h50",      ic: "🕰️", name: "Fifty hours",       desc: "50 hours of training",              goal: 3000,  val: b => b.minutes },
+  { id: "str7",     ic: "🔥", name: "Week alight",       desc: "7 days in a row",                   goal: 7,     val: b => b.bestAny },
+  { id: "str30",    ic: "🌋", name: "Month alight",      desc: "30 days in a row",                  goal: 30,    val: b => b.bestAny },
+  { id: "gap30",    ic: "🛡️", name: "No two off",        desc: "30 days without two rest days",     goal: 30,    val: b => b.bestGap },
+  { id: "wk4",      ic: "🎯", name: "Four in a row",     desc: "Hit the weekly goal 4 weeks running", goal: 4,   val: b => b.bestWeek },
+  { id: "wk12",     ic: "🏆", name: "A season",          desc: "Hit the weekly goal 12 weeks running", goal: 12, val: b => b.bestWeek },
+  { id: "full7",    ic: "🗓️", name: "Perfect week",      desc: "Train all 7 days of one week",      goal: 1,     val: b => b.perfectWeeks },
+  { id: "rainbow",  ic: "🌈", name: "Well rounded",      desc: "All 5 categories in one week",      goal: 1,     val: b => b.rainbowWeeks },
+  { id: "stretch20",ic: "🧘", name: "Limber",            desc: "20 stretch sessions",               goal: 20,    val: b => b.stretchSessions },
+  { id: "vol1k",    ic: "💪", name: "A tonne",           desc: "1,000 kg of total volume",          goal: 1000,  val: b => b.volumeKg },
+  { id: "vol10k",   ic: "🦾", name: "Ten tonnes",        desc: "10,000 kg of total volume",         goal: 10000, val: b => b.volumeKg },
+  { id: "kcal1k",   ic: "🔋", name: "First thousand",    desc: "1,000 kcal burned",                 goal: 1000,  val: b => b.kcal },
+  { id: "kcal25k",  ic: "⚡", name: "Twenty-five k",     desc: "25,000 kcal burned",                goal: 25000, val: b => b.kcal },
+  { id: "weigh10",  ic: "⚖️", name: "On the scales",     desc: "10 weigh-ins",                      goal: 10,    val: b => b.weighIns },
+  { id: "weigh100", ic: "📉", name: "Tracked",           desc: "100 weigh-ins",                     goal: 100,   val: b => b.weighIns },
+  { id: "early10",  ic: "🌅", name: "Early bird",        desc: "10 sessions before 7am",            goal: 10,    val: b => b.early },
+  { id: "variety20",ic: "🎲", name: "Explorer",          desc: "20 different exercises tried",      goal: 20,    val: b => b.distinct }
+];
+function badgeStats() {
+  const logs = DB.logs;
+  const minutes = Math.round(logs.reduce((s, l) => s + (l.secs || 0), 0) / 60);
+  const cats = {};
+  const days = {};
+  let early = 0, stretchSessions = 0;
+  const distinct = new Set();
+  logs.forEach(l => {
+    distinct.add(l.exId || l.name);
+    if (l.cat === "stretch") stretchSessions++;
+    if (new Date(l.ts).getHours() < 7) early++;
+    (days[l.date] = days[l.date] || new Set()).add(l.cat);
+  });
+  // per-week: perfect (7/7 days) and rainbow (all 5 categories)
+  let perfectWeeks = 0, rainbowWeeks = 0;
+  const weeks = {};
+  Object.keys(days).forEach(d => {
+    const wk = weekKeyOf(fromYmd(d));
+    (weeks[wk] = weeks[wk] || { days: new Set(), cats: new Set() });
+    weeks[wk].days.add(d);
+    days[d].forEach(c => weeks[wk].cats.add(c));
+  });
+  Object.keys(weeks).forEach(wk => {
+    if (weeks[wk].days.size >= 7) perfectWeeks++;
+    if (weeks[wk].cats.size >= 5) rainbowWeeks++;
+  });
+  return {
+    sessions: logs.length, minutes,
+    bestAny: dayStreak("any").best, bestGap: dayStreak("gap").best, bestWeek: weekStreak().best,
+    perfectWeeks, rainbowWeeks, stretchSessions,
+    volumeKg: Math.round(volumeOfLogs(logs)),
+    kcal: Math.round(kcalOfLogs(logs)),
+    weighIns: weightKeys().length,
+    early, distinct: distinct.size
+  };
+}
+function badgeState() {
+  const b = badgeStats();
+  return BADGES.map(x => {
+    const val = Math.max(0, x.val(b) || 0);
+    return { badge: x, val, goal: x.goal, earned: val >= x.goal, pct: Math.min(100, val / x.goal * 100) };
+  });
+}
+
+/* =====================================================================
+   INSIGHTS — observations drawn from your own log, not generic advice.
+   The two guideline anchors are the WHO's public physical-activity
+   recommendations (150 min moderate activity + 2 strength days a week).
+   ===================================================================== */
+function insights() {
+  const out = [];
+  const add = (ic, txt, kind) => out.push({ ic, txt, kind: kind || "info" });
+  const wk = weekKeyOf(new Date());
+  const wkLogs = logsBetween(wk, ymd(addDays(fromYmd(wk), 6)));
+  const mins = Math.round(weekSecs(wk) / 60);
+  const today = midnight();
+
+  // 1. WHO: 150 minutes of moderate-or-better activity a week
+  const modMins = Math.round(wkLogs.filter(l => metOfLog(l) >= 3).reduce((s, l) => s + l.secs, 0) / 60);
+  if (modMins >= 150) add("✅", `${modMins} min of moderate-or-harder activity this week — past the 150 the WHO suggests.`, "good");
+  else add("🎯", `${modMins} of 150 min moderate activity this week (WHO guideline) — ${150 - modMins} to go.`, "info");
+
+  // 2. WHO: strength work on 2+ days a week
+  const strengthDays = new Set(wkLogs.filter(l => l.cat === "dumbbell" || l.cat === "body").map(l => l.date));
+  if (strengthDays.size >= 2) add("💪", `Strength work on ${strengthDays.size} days this week — the guideline is 2.`, "good");
+  else add("💪", `Strength work on ${strengthDays.size} day${strengthDays.size === 1 ? "" : "s"} this week. Two is the usual recommendation.`, "warn");
+
+  // 3. neglected category
+  const lastCat = {};
+  DB.logs.forEach(l => { if (!lastCat[l.cat] || l.date > lastCat[l.cat]) lastCat[l.cat] = l.date; });
+  CATS.forEach(c => {
+    const last = lastCat[c.id];
+    const gap = last ? Math.round((today - fromYmd(last)) / 86400000) : null;
+    if (gap != null && gap >= 14) add("🕸️", `No ${c.name.toLowerCase()} work in ${gap} days — it's the one you skip most.`, "warn");
+  });
+
+  // 4. rest days piling up
+  let restRun = 0;
+  for (let i = 1; i <= 10; i++) { if (secsOn(ymd(addDays(today, -i))) > 0) break; restRun++; }
+  if (restRun >= 3) add("😴", `${restRun} rest days in a row. A short easy session is usually easier to start than a hard one.`, "warn");
+
+  // 5. no rest at all
+  let trainRun = 0;
+  for (let i = 0; i < 14; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
+  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built.`, "warn");
+
+  // 6. this week against your own recent norm
+  let prior = 0;
+  for (let i = 1; i <= 4; i++) prior += weekSecs(ymd(addDays(fromYmd(wk), -7 * i)));
+  const avg = Math.round(prior / 4 / 60);
+  if (avg > 10) {
+    const diff = Math.round((mins - avg) / avg * 100);
+    if (diff <= -30) add("📉", `${mins} min this week vs a ${avg} min average — down ${-diff}%.`, "warn");
+    else if (diff >= 30) add("📈", `${mins} min this week vs a ${avg} min average — up ${diff}%.`, "good");
+  }
+
+  // 7. weight trend and its rate
+  const kg = latestWeightKg();
+  if (kg > 0) {
+    const t7 = weightTrend(7), t30 = weightTrend(30);
+    const d = t7 - t30;
+    if (Math.abs(d) >= 0.3) {
+      const pctPerWeek = Math.abs(d) / kg * 100 / 3;      // ~3 weeks between the window centres
+      const dir = d < 0 ? "down" : "up";
+      if (pctPerWeek > 1) add("⚠️", `Weight is ${dir} ${fmtW(Math.abs(d))} on the trend — that is a fast rate. Around 0.5–1% of bodyweight a week is the usual sustainable range.`, "warn");
+      else add(d < 0 ? "📉" : "📈", `Weight trend is ${dir} ${fmtW(Math.abs(d))} comparing the last week to the last month.`, "info");
+    }
+  }
+  // 8. stale weigh-in
+  const wKeys = weightKeys();
+  if (wKeys.length) {
+    const gap = Math.round((today - fromYmd(wKeys[wKeys.length - 1])) / 86400000);
+    if (gap >= 10) add("⚖️", `Last weigh-in was ${gap} days ago. Weekly is enough — daily is noise.`, "info");
+  } else add("⚖️", "No weigh-ins yet. Without one, calories can't be estimated at all.", "info");
+
+  // 9. waist-to-height
+  const waist = latestWaistCm(), h = DB.profile.heightCm;
+  if (waist > 0 && h > 0) {
+    const r = whtr(waist, h), band = whtrBand(r);
+    if (r >= 0.5) add("📏", `Waist-to-height is ${r.toFixed(2)} (${band.label}). Under 0.5 — waist less than half your height — is the usual target.`, "warn");
+    else add("📏", `Waist-to-height is ${r.toFixed(2)} — ${band.label}.`, "good");
+  } else if (h > 0 && !waist) {
+    add("📏", "Try a waist measurement — it reads body-fat risk better than BMI, which can't tell muscle from fat.", "info");
+  }
+
+  // 10. load that hasn't moved
+  const byEx = {};
+  DB.logs.filter(l => l.load > 0).forEach(l => {
+    (byEx[l.exId] = byEx[l.exId] || []).push(l);
+  });
+  Object.keys(byEx).forEach(id => {
+    const rows = byEx[id].sort((a, b) => a.ts - b.ts);
+    if (rows.length < 8) return;
+    const first = rows[0], last = rows[rows.length - 1];
+    const weeks = (fromYmd(last.date) - fromYmd(first.date)) / 604800000;
+    if (weeks >= 6 && last.load <= first.load) {
+      add("🏋️", `${last.name} has been at ${fmtW(last.load)} for ${Math.round(weeks)} weeks. Adding a little load or a set is how it keeps working.`, "info");
+    }
+  });
+
+  // 11. when you actually train
+  const hours = {};
+  DB.logs.forEach(l => { const h2 = new Date(l.ts).getHours(); hours[h2] = (hours[h2] || 0) + 1; });
+  const top = Object.keys(hours).sort((a, b) => hours[b] - hours[a])[0];
+  if (top != null && DB.logs.length >= 20) {
+    const share = Math.round(hours[top] / DB.logs.length * 100);
+    if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
+  }
+  return out;
+}
+
 function niceMax(v) {
   if (v <= 0) return 10;
   const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1080, 1440, 2160, 2880];
@@ -1325,9 +1615,13 @@ const RUN = {
   startedAt: 0, elapsed: 0, paused: false, resting: false, restLeft: 0,
   restLen: 0, restEnds: 0, routineName: "", tick: null, lastCue: -1
 };
-function startExercise(exId, durOverride) {
+// N sets of one exercise is just a queue of N copies with a rest between —
+// the runner already knows how to walk a queue, so sets cost no new machinery.
+function startExercise(exId, durOverride, setsOverride) {
   const ex = exById(exId); if (!ex) return;
-  startQueue([exId], 0, "", durOverride);
+  const n = Math.max(1, setsOverride != null ? setsOverride : (ex.sets || 1));
+  const ids = []; for (let i = 0; i < n; i++) ids.push(exId);
+  startQueue(ids, n > 1 ? (ex.setRest || 0) : 0, n > 1 ? `${n} sets` : "", durOverride);
 }
 function startRoutine(rt) {
   const items = rt.items.filter(exById);
@@ -1335,6 +1629,9 @@ function startRoutine(rt) {
   startQueue(items, rt.rest == null ? DB.settings.rest : rt.rest, rt.name);
 }
 function startQueue(ids, rest, name, durOverride) {
+  // a mixed queue keeps each exercise's own duration; only a single-exercise
+  // set series may share one
+  if (durOverride != null && ids.some(i => i !== ids[0])) durOverride = null;
   RUN.active = true; RUN.queue = ids.slice(); RUN.idx = 0;
   RUN.restLen = rest || 0; RUN.routineName = name || "";
   RUN.durOverride = durOverride == null ? null : durOverride;
@@ -1346,7 +1643,7 @@ function startQueue(ids, rest, name, durOverride) {
 function beginCurrent() {
   const ex = exById(RUN.queue[RUN.idx]);
   RUN.exId = ex.id;
-  RUN.dur = (RUN.idx === 0 && RUN.durOverride != null) ? RUN.durOverride : (ex.dur || 0);
+  RUN.dur = RUN.durOverride != null ? RUN.durOverride : (ex.dur || 0);
   RUN.startedAt = Date.now(); RUN.elapsed = 0;
   RUN.paused = false; RUN.resting = false; RUN.lastCue = -1;
   renderRunner();
@@ -1424,7 +1721,9 @@ function renderRunner() {
   r.innerHTML = `
     <div class="rtop">
       <button id="rClose">✕ End</button>
-      <span class="hint" style="margin:0">${RUN.routineName ? esc(RUN.routineName) + " · " : ""}${RUN.idx + 1} of ${RUN.queue.length}</span>
+      <span class="hint" style="margin:0">${RUN.queue.length > 1 && RUN.queue.every(i => i === RUN.queue[0])
+        ? `Set ${RUN.idx + 1} of ${RUN.queue.length}`
+        : `${RUN.routineName ? esc(RUN.routineName) + " · " : ""}${RUN.idx + 1} of ${RUN.queue.length}`}</span>
     </div>
     <div class="rprog">${RUN.queue.map((_, i) => {
       const done = resting ? i <= RUN.idx : i < RUN.idx;
@@ -1512,8 +1811,11 @@ const logsBetween = (a, b) => DB.logs.filter(l => l.date >= a && l.date <= b);
 const sumSecs = arr => arr.reduce((s, l) => s + (l.secs || 0), 0);
 /*</pure>*/
 function deleteLog(id) {
+  const l = DB.logs.find(x => x.id === id);
+  snapshotForUndo("delete session");
   DB.logs = DB.logs.filter(x => x.id !== id);
   save(true);
+  return l;
 }
 
 /* =====================================================================
@@ -1585,6 +1887,13 @@ function renderToday() {
 
   renderStreaks();
   renderWeekGoal();
+  renderInsights("tipsToday", 3);
+  // the weekly review is worth reading while last week is still fresh; after
+  // Wednesday it just crowds Today, and it stays permanently on History
+  const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
+  const early = dowMon(new Date()) <= 2;
+  $("reviewCard").classList.toggle("hide", !early || !logsBetween(lastMon, ymd(addDays(fromYmd(lastMon), 6))).length);
+  if (early) $("reviewToday").innerHTML = weekReviewHTML(lastMon);
   renderBodyCard();
   renderRoutineList();
   renderChainList();
@@ -1606,7 +1915,7 @@ function logLine(l) {
 // starting another set.
 function logTile(l) {
   const ex = exById(l.exId);
-  const met = l.met > 0 ? l.met : exerciseMet(ex);
+  const met = metOfLog(l);
   const rate = l.rate > 0 ? l.rate : (ex && ex.rate > 0 ? ex.rate : 0);
   const load = l.load > 0 ? l.load : (ex && ex.load > 0 ? ex.load : 0);
   const extra = rate ? `${rate}/min` : (load ? fmtW(load) : "");
@@ -1646,15 +1955,19 @@ function editLog(id) {
     <div class="hint" style="margin-top:0">Logged ${new Date(l.ts).toLocaleString(undefined,
       { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
     <div class="kv" style="margin-top:10px"><span>Category</span><b>${esc(catName(l.cat))}</b></div>
-    <div class="kv"><span>Intensity</span><b>MET ${(l.met > 0 ? l.met : exerciseMet(exById(l.exId))).toFixed(1)}</b></div>
+    <div class="kv"><span>Intensity</span><b>MET ${metOfLog(l).toFixed(1)}</b></div>
     ${l.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${l.rate}/min</b></div>` : ""}
     ${canEstimateKcal() ? `<div class="kv"><span>Estimated burn</span><b>${Math.round(kcalOfLog(l))} kcal</b></div>` : ""}
+    ${volumeKgOf(l) > 0 ? `<div class="kv"><span>Volume</span><b>${Math.round(volumeKgOf(l))} kg${
+      repsAreEstimated(l) ? " (est.)" : ""}</b></div>` : ""}
     <div class="btnrow" style="margin-top:14px">
       <div class="field" style="flex:1"><label for="elMin">Minutes</label>
         <input type="number" id="elMin" min="0" max="600" value="${Math.floor(l.secs / 60)}"></div>
       <div class="field" style="flex:1"><label for="elSec">Seconds</label>
         <input type="number" id="elSec" min="0" max="59" value="${l.secs % 60}"></div>
     </div>
+    <div class="field"><label for="elReps">Reps${repsAreEstimated(l) ? ` — blank means ${repsOf(l)}, estimated from ${l.rate || (exById(l.exId) || {}).rate}/min` : ""}</label>
+      <input type="number" id="elReps" min="0" max="2000" value="${l.reps > 0 ? l.reps : ""}"></div>
     <div class="field"><label for="elLoad">Load (${wUnit()}) — what you actually lifted this session</label>
       <input type="number" id="elLoad" min="0" step="0.5" inputmode="decimal"
         value="${l.load > 0 ? Math.round(toDisplayW(l.load) * 10) / 10 : ""}"></div>
@@ -1674,6 +1987,7 @@ function editLog(id) {
       if (secs < 1) { toast("Duration has to be more than zero", "err"); return; }
       l.secs = secs;
       l.load = Math.max(0, fromDisplayW(+$("elLoad").value || 0));
+      l.reps = Math.max(0, +$("elReps").value || 0);
       // moving the default forward is the usual reason you changed it — 8kg today,
       // 10kg from now on — but it stays opt-in so a one-off heavy set doesn't stick
       const ex = exById(l.exId);
@@ -1683,8 +1997,8 @@ function editLog(id) {
       toast(ex && $("elDefault") && $("elDefault").checked ? `Saved · ${esc(ex.name)} now defaults to ${fmtW(l.load)}` : "Saved");
     };
     $("elDel").onclick = () => {
-      if (!confirm(`Delete ${l.name} (${mmss(l.secs)})?`)) return;
-      deleteLog(l.id); closeSheet(); refreshAfterLogChange(); toast("Deleted");
+      deleteLog(l.id); closeSheet(); refreshAfterLogChange();
+      offerUndo(`Deleted ${l.name}`);
     };
   });
 }
@@ -1758,13 +2072,14 @@ function openDayEdit(k) {
     $("deCancel").onclick = closeSheet;
     $("deSave").onclick = () => {
       harvest();
+      snapshotForUndo("edit day");
       const res = applyDayEdit(k, rows, uid);
       save(true); closeSheet(); refreshAfterLogChange();
       const bits = [];
       if (res.set) bits.push(`${res.set} updated`);
       if (res.merged) bits.push(`${res.merged} merged`);
       if (res.cleared) bits.push(`${res.cleared} cleared`);
-      toast(bits.length ? bits.join(" · ") : "No changes");
+      if (bits.length) offerUndo(bits.join(" · ")); else toast("No changes");
     };
   });
 }
@@ -1938,8 +2253,46 @@ function askWeight(k) {
       save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); toast("Saved");
     };
     if (cur != null) $("wwDel").onclick = () => {
+      snapshotForUndo("delete weigh-in");
       delete DB.weights[k];
-      save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); toast("Deleted");
+      save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); offerUndo("Weigh-in deleted");
+    };
+  });
+}
+
+function askWaist(k) {
+  const cur = DB.waists[k];
+  const shown = cur != null ? (Math.round(toDisplayL(cur) * 10) / 10) : "";
+  openSheet(`
+    <h3>Waist</h3>
+    <div class="hint" style="margin-top:0">${fromYmd(k).toLocaleDateString(undefined,
+      { weekday: "long", month: "long", day: "numeric" })}</div>
+    <div class="field" style="margin-top:14px"><label for="wsVal">Waist (${lUnit()})</label>
+      <input type="number" id="wsVal" step="0.1" min="0" inputmode="decimal" value="${shown}"></div>
+    <div class="hint" style="margin-top:-8px">Measure standing, tape level with your navel,
+      snug but not compressing, at the end of a normal breath out. Same time of day each time —
+      first thing in the morning is the most repeatable.</div>
+    <div class="field"><label for="wsDate">Date</label>
+      <input type="date" id="wsDate" value="${k}" max="${todayStr()}"></div>
+    <div class="btnrow">
+      <button class="btn sec" id="wsCancel">Cancel</button>
+      <button class="btn" id="wsOk">Save</button>
+    </div>
+    ${cur != null ? `<button class="btn danger" id="wsDel" style="margin-top:8px">Delete this measurement</button>` : ""}`, () => {
+    $("wsVal").focus();
+    $("wsCancel").onclick = closeSheet;
+    $("wsOk").onclick = () => {
+      const v = +$("wsVal").value;
+      if (!(v > 0)) { toast("Enter a measurement", "err"); return; }
+      const d = $("wsDate").value || k;
+      if (d !== k) delete DB.waists[k];
+      DB.waists[d] = Math.round(fromDisplayL(v) * 10) / 10;
+      save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); toast("Saved");
+    };
+    if (cur != null) $("wsDel").onclick = () => {
+      snapshotForUndo("delete waist");
+      delete DB.waists[k];
+      save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); offerUndo("Measurement deleted");
     };
   });
 }
@@ -1995,6 +2348,35 @@ function paintBody() {
     </div>
 
     <div class="card">
+      <h2>Waist <span class="act" id="bWaistLog">${DB.waists[todayStr()] != null ? "update" : "+ measure"}</span></h2>
+      ${(() => {
+        const wk2 = waistKeys();
+        if (!wk2.length) return `<div class="hint" style="margin-top:0">Not measured yet. Waist-to-height
+          reads fat risk better than BMI, which can't tell muscle from fat — the target is simply
+          a waist under half your height.</div>`;
+        const last = wk2[wk2.length - 1], cmw = DB.waists[last];
+        const r = whtr(cmw, cm), band = whtrBand(r);
+        const first = DB.waists[wk2[0]];
+        return `<div class="streakrow">
+            <div class="stat"><div class="n">${(Math.round(toDisplayL(cmw) * 10) / 10).toFixed(1)}<small>${lUnit()}</small></div>
+              <div class="l">${relDay(fromYmd(last).getTime())}</div></div>
+            <div class="stat"><div class="n" style="color:${band.color}">${r ? r.toFixed(2) : "—"}</div><div class="l">Waist / height</div></div>
+            <div class="stat"><div class="n">${wk2.length > 1 ? ((cmw - first) > 0 ? "+" : "") + (Math.round(toDisplayL(cmw - first) * 10) / 10).toFixed(1) : "—"}</div>
+              <div class="l">Since first</div></div>
+          </div>
+          ${r ? `<div class="hint"><b style="color:${band.color}">${band.label}</b> — under 0.5 is the target,
+            i.e. a waist below ${fmtL(cm / 2)}.</div>` : ""}
+          <div id="bWaistList" style="margin-top:6px">${wk2.slice().reverse().slice(0, 8).map(k2 => `
+            <div class="exrow" style="cursor:default">
+              <div style="flex:1;min-width:0"><div class="t">${fromYmd(k2).toLocaleDateString(undefined,
+                { month: "short", day: "numeric", year: "numeric" })}</div></div>
+              <div class="r" style="color:var(--txt);font-weight:700">${fmtL(DB.waists[k2])}</div>
+              <button class="chip" data-wsedit="${k2}" aria-label="Edit">✎</button>
+            </div>`).join("")}</div>`;
+      })()}
+    </div>
+
+    <div class="card">
       <h2>Weigh-ins <span class="act" style="color:var(--muted);cursor:default">${keys.length}</span></h2>
       <div id="bList">${keys.length ? keys.slice().reverse().slice(0, 40).map(k => `
         <div class="exrow" data-w="${k}">
@@ -2011,6 +2393,9 @@ function paintBody() {
       b.onclick = () => { bodyRange = +b.dataset.r; paintBody(); });
   }
   $("bLog").onclick = () => askWeight(todayStr());
+  $("bWaistLog").onclick = () => askWaist(todayStr());
+  const wl = $("bWaistList");
+  if (wl) wl.querySelectorAll("[data-wsedit]").forEach(b => b.onclick = () => askWaist(b.dataset.wsedit));
   $("bList") && $("bList").querySelectorAll("[data-wedit]").forEach(b =>
     b.onclick = () => askWeight(b.dataset.wedit));
 }
@@ -2048,6 +2433,70 @@ function weightChart(days) {
       <span>${(Math.round(toDisplayW(lo) * 10) / 10).toFixed(1)}–${(Math.round(toDisplayW(hi) * 10) / 10).toFixed(1)} ${wUnit()}${range ? " · shaded = healthy BMI" : ""}</span>
       <span>${fromYmd(ymd(new Date(x1))).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
     </div>`;
+}
+
+/* ---------- WEEKLY REVIEW ---------- */
+function weekReviewHTML(mondayKey) {
+  const from = mondayKey, to = ymd(addDays(fromYmd(mondayKey), 6));
+  const rows = logsBetween(from, to);
+  const secs = sumSecs(rows), goal = weekGoalMin(mondayKey);
+  const prevKey = ymd(addDays(fromYmd(mondayKey), -7));
+  const prevSecs = weekSecs(prevKey);
+  const days = activeDays(from, to);
+  const cats = new Set(rows.map(l => l.cat));
+  const byEx = {};
+  rows.forEach(l => { const k = l.exId || l.name; byEx[k] = (byEx[k] || 0) + l.secs; });
+  const top = Object.keys(byEx).sort((a, b) => byEx[b] - byEx[a])[0];
+  const topName = top ? (rows.find(l => (l.exId || l.name) === top) || {}).name : null;
+  const wStart = weightKeys().filter(k => k <= from).pop();
+  const wEnd = weightKeys().filter(k => k <= to).pop();
+  const dw = (wStart && wEnd && wStart !== wEnd) ? DB.weights[wEnd] - DB.weights[wStart] : null;
+  const diff = prevSecs > 0 ? Math.round((secs - prevSecs) / prevSecs * 100) : null;
+
+  if (!rows.length) return `<div class="empty">Nothing logged that week.</div>`;
+  return `
+    <div class="streakrow">
+      <div class="stat"><div class="n">${minsOf(secs)}<small>/${goal}</small></div><div class="l">Minutes</div></div>
+      <div class="stat"><div class="n">${days}<small>/7</small></div><div class="l">Days</div></div>
+      <div class="stat"><div class="n">${canEstimateKcal() ? Math.round(kcalOfLogs(rows)) : "—"}</div><div class="l">kcal</div></div>
+    </div>
+    <div class="kv" style="margin-top:10px"><span>Weekly goal</span>
+      <b style="color:${secs / 60 >= goal ? "var(--good)" : "var(--warn)"}">${
+        secs / 60 >= goal ? "hit 🏆" : `${Math.max(0, Math.ceil(goal - secs / 60))} min short`}</b></div>
+    ${diff != null ? `<div class="kv"><span>vs the week before</span>
+      <b style="color:${diff >= 0 ? "var(--good)" : "var(--warn)"}">${diff >= 0 ? "+" : ""}${diff}%</b></div>` : ""}
+    <div class="kv"><span>Sessions</span><b>${rows.length}</b></div>
+    ${topName ? `<div class="kv"><span>Most time on</span><b>${esc(topName)}</b></div>` : ""}
+    <div class="kv"><span>Categories touched</span><b>${cats.size} of ${CATS.length}</b></div>
+    ${volumeOfLogs(rows) > 0 ? `<div class="kv"><span>Volume lifted</span><b>${Math.round(volumeOfLogs(rows))} kg</b></div>` : ""}
+    ${dw != null ? `<div class="kv"><span>Weight change</span>
+      <b style="color:${dw <= 0 ? "var(--good)" : "var(--warn)"}">${dw > 0 ? "+" : ""}${fmtW(dw)}</b></div>` : ""}`;
+}
+
+/* ---------- ACHIEVEMENTS + INSIGHTS ---------- */
+function renderBadges(elId, compact) {
+  const st = badgeState();
+  const earned = st.filter(x => x.earned);
+  const next = st.filter(x => !x.earned).sort((a, b) => b.pct - a.pct);
+  const show = compact ? earned.slice(-6).concat(next.slice(0, 2)) : earned.concat(next);
+  const el = $(elId); if (!el) return;
+  el.innerHTML = `<div class="hint" style="margin:0 0 10px">${earned.length} of ${st.length} earned</div>`
+    + `<div class="badgegrid">${show.map(x => `
+      <div class="badge ${x.earned ? "on" : ""}" title="${esc(x.badge.desc)}">
+        <div class="bic">${x.badge.ic}</div>
+        <div class="bn">${esc(x.badge.name)}</div>
+        ${x.earned ? `<div class="bp done">earned</div>`
+          : `<div class="bbar"><i style="width:${x.pct}%"></i></div>
+             <div class="bp">${Math.floor(x.val)} / ${x.goal}</div>`}
+      </div>`).join("")}</div>`;
+}
+function renderInsights(elId, limit) {
+  const el = $(elId); if (!el) return;
+  const all = insights();
+  const list = limit ? all.slice(0, limit) : all;
+  el.innerHTML = list.length
+    ? list.map(i => `<div class="tip ${i.kind}"><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
+    : `<div class="empty">Log a few sessions and suggestions will show up here.</div>`;
 }
 
 /* ---------- CALENDAR ---------- */
@@ -2265,6 +2714,10 @@ function renderHistory() {
     let c = fromYmd(firstK); const end = midnight();
     while (c <= end) { const i = dowMon(c); sums[i] += secsOn(ymd(c)); counts[i]++; c = addDays(c, 1); }
   }
+  $("reviewHist").innerHTML = weekReviewHTML(ymd(addDays(fromYmd(weekKeyOf(new Date())), -7)));
+  renderBadges("badgeBox", false);
+  renderInsights("tipsAll", 0);
+
   const avgs = sums.map((s, i) => counts[i] ? s / counts[i] / 60 : 0);
   const amax = Math.max(1, ...avgs);
   $("dowChart").innerHTML = avgs.map((v, i) => `<div class="hcol">
@@ -2355,8 +2808,15 @@ function paintExercise() {
           `<span class="chip" data-setdur="${s}">${s ? durLabel(s) : "open"}</span>`).join("")}
       </div>
       <div class="hint" id="evKcal" style="text-align:center"></div>
-      <button class="btn" id="evStart" style="margin-top:12px">Start</button>
-      <button class="btn sec" id="evSaveDur" style="margin-top:8px">Save as default duration</button>
+      <div class="btnrow" style="margin-top:12px">
+        <div class="field" style="flex:1;margin-bottom:0"><label for="evSets">Sets</label>
+          <input type="number" id="evSets" min="1" max="20" value="${e.sets || 1}"></div>
+        <div class="field" style="flex:1;margin-bottom:0"><label for="evRest">Rest between (s)</label>
+          <input type="number" id="evRest" min="0" max="600" step="5" value="${e.setRest == null ? 60 : e.setRest}"></div>
+      </div>
+      <div class="hint" id="evPlan" style="text-align:center"></div>
+      <button class="btn" id="evStart" style="margin-top:8px">Start</button>
+      <button class="btn sec" id="evSaveDur" style="margin-top:8px">Save duration, sets and rest as default</button>
     </div>
 
     <div class="card">
@@ -2405,12 +2865,29 @@ function paintExercise() {
                : `≈ <b>${(kcalFrom(60, exerciseMet(e), kg)).toFixed(1)} kcal/min</b> at MET ${exerciseMet(e).toFixed(1)}`);
   };
   lab();
-  $("evMinus").onclick = () => { evDur = Math.max(0, evDur - (evDur > 300 ? 60 : 30)); lab(); };
-  $("evPlus").onclick = () => { evDur = Math.min(7200, evDur + (evDur >= 300 ? 60 : 30)); lab(); };
+  const origLab = lab;
+  $("evMinus").onclick = () => { evDur = Math.max(0, evDur - (evDur > 300 ? 60 : 30)); lab(); plan(); };
+  $("evPlus").onclick = () => { evDur = Math.min(7200, evDur + (evDur >= 300 ? 60 : 30)); lab(); plan(); };
   $("evBody").querySelectorAll("[data-setdur]").forEach(c =>
-    c.onclick = () => { evDur = +c.dataset.setdur; lab(); });
-  $("evStart").onclick = () => startExercise(e.id, evDur);
-  $("evSaveDur").onclick = () => { e.dur = evDur; save(true); renderAll(); toast("Default duration saved"); };
+    c.onclick = () => { evDur = +c.dataset.setdur; lab(); plan(); });
+  const plan = () => {
+    const n = Math.max(1, +$("evSets").value || 1), r = Math.max(0, +$("evRest").value || 0);
+    const total = n * evDur + Math.max(0, n - 1) * r;
+    $("evPlan").textContent = n > 1
+      ? `${n} sets of ${evDur ? mmss(evDur) : "open"} with ${r}s rest — about ${minsOf(total)} min in all`
+      : "";
+    const reps = e.rate > 0 && evDur ? Math.round(e.rate * evDur / 60) * n : 0;
+    if (reps) $("evPlan").textContent += ` · roughly ${reps} reps at ${e.rate}/min`;
+  };
+  plan();
+  $("evSets").oninput = plan; $("evRest").oninput = plan;
+  $("evStart").onclick = () => startExercise(e.id, evDur, Math.max(1, +$("evSets").value || 1));
+  $("evSaveDur").onclick = () => {
+    e.dur = evDur;
+    e.sets = Math.max(1, +$("evSets").value || 1);
+    e.setRest = Math.max(0, +$("evRest").value || 0);
+    save(true); renderAll(); toast("Saved as this exercise's default");
+  };
   $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
   $("evLogManual").onclick = () => manualLog(e.id);
   bindLogLines($("evLogs"));
@@ -2557,9 +3034,10 @@ function editExercise(ex) {
     if (!isNew) $("exDel").onclick = () => {
       const used = DB.logs.filter(l => l.exId === ex.id).length;
       if (!confirm(used ? `Delete "${ex.name}"? Its ${used} logged session${used === 1 ? "" : "s"} stay in history.` : `Delete "${ex.name}"?`)) return;
+      snapshotForUndo("delete exercise");
       ex.arch = true;                                    // soft-delete keeps history joins intact
       DB.routines.forEach(r => r.items = r.items.filter(i => i !== ex.id));
-      save(true); closeSheet(); closeExercise(); renderAll(); toast("Deleted");
+      save(true); closeSheet(); closeExercise(); renderAll(); offerUndo(`Deleted ${ex.name}`);
     };
   });
 }
@@ -2618,9 +3096,9 @@ function editRoutine(rt) {
       save(true); closeSheet(); renderAll(); toast(isNew ? "Created" : "Saved");
     };
     if (!isNew) $("rtDel").onclick = () => {
-      if (!confirm(`Delete circuit "${rt.name}"?`)) return;
+      snapshotForUndo("delete circuit");
       DB.routines = DB.routines.filter(x => x.id !== rt.id);
-      save(true); closeSheet(); renderAll(); toast("Deleted");
+      save(true); closeSheet(); renderAll(); offerUndo(`Deleted ${rt.name}`);
     };
   });
 }
@@ -2664,15 +3142,21 @@ function manualLog(exId) {
 const SHEET_SCHEMA = {
   Sessions: {
     cols: ["id", "date", "time", "exercise", "category", "seconds", "minutes", "met", "kcal",
-           "load_kg", "rate_per_min", "reps", "note", "exId"],
+           "load_kg", "rate_per_min", "reps", "reps_estimated", "volume_kg", "note", "exId"],
     rows: () => DB.logs.slice().sort((a, b) => a.ts - b.ts).map(l => [
       l.id, l.date, new Date(l.ts).toTimeString().slice(0, 5), l.name, catName(l.cat),
       l.secs, Math.round(l.secs / 60 * 100) / 100, l.met || "", Math.round(kcalOfLog(l)),
-      l.load || "", l.rate || "", l.reps || "", l.note || "", l.exId])
+      l.load || "", l.rate || "", repsOf(l) || "", repsAreEstimated(l) ? "yes" : "",
+      Math.round(volumeKgOf(l)) || "", l.note || "", l.exId])
   },
   Weight: {
     cols: ["date", "kg", "lb"],
     rows: () => weightKeys().map(k => [k, DB.weights[k], Math.round(kgToLb(DB.weights[k]) * 100) / 100])
+  },
+  Waist: {
+    cols: ["date", "cm", "in", "waist_to_height"],
+    rows: () => waistKeys().map(k => [k, DB.waists[k], Math.round(DB.waists[k] / 2.54 * 100) / 100,
+      DB.profile.heightCm ? Math.round(whtr(DB.waists[k], DB.profile.heightCm) * 1000) / 1000 : ""])
   },
   Exercises: {
     cols: ["id", "name", "category", "seconds", "art", "favourite", "met", "load_kg", "rate_per_min", "note", "archived"],
@@ -2935,6 +3419,8 @@ function boot() {
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
   $("fab").onclick = () => editExercise(null);
   $("goExercises").onclick = () => showTab("ex");
+  $("goTips").onclick = () => showTab("history");
+  $("goReview").onclick = () => showTab("history");
   $("editToday").onclick = () => openDayEdit(todayStr());
   $("goBody").onclick = openBody;
   $("bvBack").onclick = closeBody;
@@ -3025,7 +3511,8 @@ function boot() {
     DEFAULT_EXERCISES.forEach(([name, cat, dur, a, fav, met], i) => {
       if (have.has(name)) return;
       DB.exercises.push({ id: uid("ex"), name, cat, dur, art: a, fav: !!fav,
-        ord: DB.exercises.length + i, arch: false, note: "", met, load: 0, rate: 0 });
+        ord: DB.exercises.length + i, arch: false, note: "", met, load: 0, rate: 0,
+        sets: 1, setRest: 60 });
       n++;
     });
     save(true); renderAll(); toast(n ? `Added ${n} exercise${n === 1 ? "" : "s"}` : "Nothing missing");
