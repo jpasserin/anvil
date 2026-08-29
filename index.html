@@ -638,7 +638,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "5";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "6";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 3;
 const LSKEY = "anvil.db";
 
@@ -1648,7 +1648,6 @@ function editLog(id) {
     <div class="kv" style="margin-top:10px"><span>Category</span><b>${esc(catName(l.cat))}</b></div>
     <div class="kv"><span>Intensity</span><b>MET ${(l.met > 0 ? l.met : exerciseMet(exById(l.exId))).toFixed(1)}</b></div>
     ${l.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${l.rate}/min</b></div>` : ""}
-    ${l.load > 0 ? `<div class="kv"><span>Load</span><b>${fmtW(l.load)}</b></div>` : ""}
     ${canEstimateKcal() ? `<div class="kv"><span>Estimated burn</span><b>${Math.round(kcalOfLog(l))} kcal</b></div>` : ""}
     <div class="btnrow" style="margin-top:14px">
       <div class="field" style="flex:1"><label for="elMin">Minutes</label>
@@ -1656,6 +1655,12 @@ function editLog(id) {
       <div class="field" style="flex:1"><label for="elSec">Seconds</label>
         <input type="number" id="elSec" min="0" max="59" value="${l.secs % 60}"></div>
     </div>
+    <div class="field"><label for="elLoad">Load (${wUnit()}) — what you actually lifted this session</label>
+      <input type="number" id="elLoad" min="0" step="0.5" inputmode="decimal"
+        value="${l.load > 0 ? Math.round(toDisplayW(l.load) * 10) / 10 : ""}"></div>
+    ${exById(l.exId) ? `<div class="field toggle">
+      <span class="small">Also make this the default for ${esc((exById(l.exId) || {}).name || "")}</span>
+      <label class="switch"><input type="checkbox" id="elDefault"><span class="sl"></span></label></div>` : ""}
     <div class="field"><label for="elDate">Date</label>
       <input type="date" id="elDate" value="${l.date}" max="${todayStr()}"></div>
     <div class="btnrow">
@@ -1668,8 +1673,14 @@ function editLog(id) {
       const secs = (+$("elMin").value || 0) * 60 + (+$("elSec").value || 0);
       if (secs < 1) { toast("Duration has to be more than zero", "err"); return; }
       l.secs = secs;
+      l.load = Math.max(0, fromDisplayW(+$("elLoad").value || 0));
+      // moving the default forward is the usual reason you changed it — 8kg today,
+      // 10kg from now on — but it stays opt-in so a one-off heavy set doesn't stick
+      const ex = exById(l.exId);
+      if (ex && $("elDefault") && $("elDefault").checked) ex.load = l.load;
       moveLogToDate(l, $("elDate").value);
-      save(true); closeSheet(); refreshAfterLogChange(); toast("Saved");
+      save(true); closeSheet(); refreshAfterLogChange();
+      toast(ex && $("elDefault") && $("elDefault").checked ? `Saved · ${esc(ex.name)} now defaults to ${fmtW(l.load)}` : "Saved");
     };
     $("elDel").onclick = () => {
       if (!confirm(`Delete ${l.name} (${mmss(l.secs)})?`)) return;
@@ -2360,7 +2371,14 @@ function paintExercise() {
         : "Not logged yet."}${canEstimateKcal() && mine.length
         ? ` · ${Math.round(kcalOfLogs(mine))} kcal all time` : ""}</div>
       <div class="kv" style="margin-top:8px"><span>Intensity (MET)</span><b>${exerciseMet(e).toFixed(1)}</b></div>
-      ${e.load > 0 ? `<div class="kv"><span>Load</span><b>${fmtW(e.load)}</b></div>` : ""}
+      ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
+      ${(() => {
+        const withLoad = mine.filter(l => l.load > 0);
+        if (!withLoad.length) return "";
+        const heaviest = Math.max(...withLoad.map(l => l.load));
+        return `<div class="kv"><span>Last lifted</span><b>${fmtW(withLoad[0].load)}</b></div>`
+          + (heaviest > withLoad[0].load ? `<div class="kv"><span>Heaviest</span><b>${fmtW(heaviest)}</b></div>` : "");
+      })()}
       ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
     </div>
 
@@ -2369,7 +2387,8 @@ function paintExercise() {
       <div id="evLogs">${mine.length
         ? mine.slice(0, 12).map(l => `<div class="exrow" style="cursor:default">
             <div style="flex:1;min-width:0"><div class="t">${fromYmd(l.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
-            <div class="s">${new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</div></div>
+            <div class="s">${new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}${
+              l.load > 0 ? " · " + fmtW(l.load) : ""}${l.rate > 0 ? " · " + l.rate + "/min" : ""}</div></div>
             <div class="r" style="color:var(--txt);font-weight:700">${mmss(l.secs)}</div>
             <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button></div>`).join("")
         : `<div class="empty">No sessions yet.</div>`}</div>
