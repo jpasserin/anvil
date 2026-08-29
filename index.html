@@ -157,6 +157,21 @@
   .extile .d{font-size:10.5px;color:var(--txt);opacity:.85;}
   .extile .w{font-size:9.5px;color:var(--muted);margin-top:1px;}
 
+  /* ---- today's logged sessions, 4 across ---- */
+  .loggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px;}
+  .logtile{background:var(--card2);border:1px solid var(--line);border-radius:11px;
+    padding:7px 3px 6px;text-align:center;cursor:pointer;position:relative;overflow:hidden;}
+  .logtile:active{transform:scale(.96)}
+  .logtile::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--catc);}
+  .logtile .a{height:34px;color:var(--accent2);}
+  .logtile .n{font-size:9.5px;font-weight:700;line-height:1.15;margin-top:3px;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:22px;}
+  .logtile .v{font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.3;}
+  .logtile .x{font-size:8.5px;line-height:1.35;color:var(--accent2);}
+  .logtile .k{font-size:8.5px;line-height:1.35;color:var(--good);}
+  .logtile .m{font-size:8px;line-height:1.35;color:var(--muted);}
+  .logtile .m.dim{opacity:.45}
+
   /* ---- body / weight ---- */
   .rangebtns{display:flex;gap:6px;margin-bottom:12px;}
   .rangebtns button{flex:1;background:var(--bg2);border:1px solid var(--line);color:var(--muted);
@@ -623,7 +638,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "4";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "5";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 3;
 const LSKEY = "anvil.db";
 
@@ -921,6 +936,7 @@ function durLabel(sec) {
 }
 const minsOf = secs => Math.round(secs / 60);
 const fmtH = secs => (Math.round(secs / 360) / 10).toString();     // seconds → hours, 1 dp
+const exById = id => DB.exercises.find(e => e.id === id);
 /*</pure>*/
 function toast(msg, kind) {
   const t = $("toast");
@@ -928,7 +944,6 @@ function toast(msg, kind) {
   clearTimeout(toast._t);
   toast._t = setTimeout(() => t.className = (kind || ""), 2200);
 }
-const exById = id => DB.exercises.find(e => e.id === id);
 
 /* ===================== sound + haptics ===================== */
 let AC = null;
@@ -1289,7 +1304,7 @@ function applyDayEdit(dateKey, rows, mkId) {
     else at.setHours(12, 0, 0, 0);                              // a past day gets a neutral midday stamp
     DB.logs.push({ id: mkId("lg"), exId: ex.id, name: ex.name, cat: ex.cat, art: ex.art,
       date: dateKey, ts: at.getTime() + i * 60000, secs: want,
-      met: exerciseMet(ex), load: ex.load || 0, reps: 0, note: "" });
+      met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, reps: 0, note: "" });
   });
   return out;
 }
@@ -1487,7 +1502,7 @@ function logEntry(exId, secs, when) {
   DB.logs.push({
     id: uid("lg"), exId, name: ex.name, cat: ex.cat, art: ex.art,
     date: ymd(d), ts: d.getTime(), secs: Math.round(secs),
-    met: exerciseMet(ex), load: ex.load || 0, reps: 0, note: ""
+    met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, reps: 0, note: ""
   });
   save();
 }
@@ -1561,7 +1576,10 @@ function renderToday() {
   }
 
   $("todayList").innerHTML = mine.length
-    ? mine.slice().sort((a, b) => b.ts - a.ts).map(logLine).join("")
+    ? `<div class="loggrid">${mine.slice().sort((a, b) => b.ts - a.ts).map(logTile).join("")}</div>`
+      + `<div class="hint">Tap a tile to review or correct it. <b>MET</b> is how many times your
+         resting metabolism the exercise costs — 1 is sitting still, 4 is brisk, 12 is hard rope work
+         — and it is what turns minutes into calories.</div>`
     : "";
   bindLogLines($("todayList"));
 
@@ -1581,6 +1599,26 @@ function logLine(l) {
     <div style="flex:1;min-width:0"><div class="t">${esc(l.name)}</div><div class="s">${time}</div></div>
     <div class="r">${mmss(l.secs)}</div>
     <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button>
+  </div>`;
+}
+// Today's sessions as tiles. Deliberately opens the SESSION editor, not the
+// exercise page — from here you are reviewing what you already did, not
+// starting another set.
+function logTile(l) {
+  const ex = exById(l.exId);
+  const met = l.met > 0 ? l.met : exerciseMet(ex);
+  const rate = l.rate > 0 ? l.rate : (ex && ex.rate > 0 ? ex.rate : 0);
+  const load = l.load > 0 ? l.load : (ex && ex.load > 0 ? ex.load : 0);
+  const extra = rate ? `${rate}/min` : (load ? fmtW(load) : "");
+  const kcal = canEstimateKcal() ? Math.round(kcalOfLog(l)) + " kcal" : "";
+  return `<div class="logtile" data-editlog="${l.id}" style="--catc:${catColor(l.cat)}"
+      title="${esc(l.name)} · ${mmss(l.secs)} · MET ${met.toFixed(1)}">
+    <div class="a">${art(l.art)}</div>
+    <div class="n">${esc(l.name)}</div>
+    <div class="v">${mmss(l.secs)}</div>
+    <div class="x">${extra || "&nbsp;"}</div>
+    <div class="k">${kcal || "&nbsp;"}</div>
+    <div class="m">MET ${met.toFixed(1)}</div>
   </div>`;
 }
 function bindLogLines(root) {
@@ -1607,6 +1645,11 @@ function editLog(id) {
     <h3>${esc(l.name)}</h3>
     <div class="hint" style="margin-top:0">Logged ${new Date(l.ts).toLocaleString(undefined,
       { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</div>
+    <div class="kv" style="margin-top:10px"><span>Category</span><b>${esc(catName(l.cat))}</b></div>
+    <div class="kv"><span>Intensity</span><b>MET ${(l.met > 0 ? l.met : exerciseMet(exById(l.exId))).toFixed(1)}</b></div>
+    ${l.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${l.rate}/min</b></div>` : ""}
+    ${l.load > 0 ? `<div class="kv"><span>Load</span><b>${fmtW(l.load)}</b></div>` : ""}
+    ${canEstimateKcal() ? `<div class="kv"><span>Estimated burn</span><b>${Math.round(kcalOfLog(l))} kcal</b></div>` : ""}
     <div class="btnrow" style="margin-top:14px">
       <div class="field" style="flex:1"><label for="elMin">Minutes</label>
         <input type="number" id="elMin" min="0" max="600" value="${Math.floor(l.secs / 60)}"></div>
@@ -2598,13 +2641,15 @@ function manualLog(exId) {
    handed. Adding a field is a one-line change in SHEET_SCHEMA — there is no
    second place to forget, which is the trap the Bench backend has.
    ===================================================================== */
+/*<pure:sheets>*/
 const SHEET_SCHEMA = {
   Sessions: {
-    cols: ["id", "date", "time", "exercise", "category", "seconds", "minutes", "met", "kcal", "load_kg", "reps", "note", "exId"],
+    cols: ["id", "date", "time", "exercise", "category", "seconds", "minutes", "met", "kcal",
+           "load_kg", "rate_per_min", "reps", "note", "exId"],
     rows: () => DB.logs.slice().sort((a, b) => a.ts - b.ts).map(l => [
       l.id, l.date, new Date(l.ts).toTimeString().slice(0, 5), l.name, catName(l.cat),
       l.secs, Math.round(l.secs / 60 * 100) / 100, l.met || "", Math.round(kcalOfLog(l)),
-      l.load || "", l.reps || "", l.note || "", l.exId])
+      l.load || "", l.rate || "", l.reps || "", l.note || "", l.exId])
   },
   Weight: {
     cols: ["date", "kg", "lb"],
@@ -2639,6 +2684,7 @@ function syncPayload() {
   for (const name in SHEET_SCHEMA) tabs[name] = { cols: SHEET_SCHEMA[name].cols, rows: SHEET_SCHEMA[name].rows() };
   return tabs;
 }
+/*</pure>*/
 const syncConfigured = () => !!(DB.settings.syncUrl && DB.settings.syncToken);
 // Apps Script web apps don't do CORS preflight, so the body goes as text/plain —
 // that keeps the request "simple" and avoids the OPTIONS round trip entirely.
