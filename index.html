@@ -100,7 +100,8 @@
 
   /* ---- big today ---- */
   .bigtoday{text-align:center;padding:10px 0 4px;}
-  .bigtoday .num{font-size:64px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+  .bigtoday .num{font-size:clamp(46px,16vw,64px);font-weight:800;line-height:1;
+    font-variant-numeric:tabular-nums;letter-spacing:-2px;}
   .bigtoday .unit{font-size:15px;color:var(--muted);margin-top:6px;}
 
   /* ---- calendar ---- */
@@ -185,10 +186,6 @@
   .badge .bbar i{display:block;height:100%;background:var(--accent2);}
   .badge .bp{font-size:8px;color:var(--muted);}
   .badge .bp.done{color:var(--good);font-weight:700;}
-  .tip{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.45;}
-  .tip:last-child{border-bottom:none;}
-  .tip .ti{flex:0 0 auto;font-size:15px;line-height:1.3;}
-  .tip.good{color:var(--good)} .tip.warn{color:var(--warn)} .tip.info{color:var(--txt)}
 
   /* ---- body / weight ---- */
   .rangebtns{display:flex;gap:6px;margin-bottom:12px;}
@@ -305,20 +302,33 @@
   .runner .rtop{display:flex;justify-content:space-between;align-items:center;gap:10px;}
   .runner .rtop button{background:var(--card2);border:1px solid var(--line);color:var(--txt);
     border-radius:10px;padding:7px 12px;font-size:13px;cursor:pointer;}
-  .runner .rname{font-size:21px;font-weight:700;line-height:1.15;margin-top:14px;}
+  /* the timer is the point of this screen: the art is a thumbnail beside the
+     name, and everything else gives its height to the ring */
+  .runner .rhead{display:flex;align-items:center;gap:11px;margin-top:12px;}
+  .runner .rthumb{flex:0 0 auto;width:52px;height:52px;border-radius:13px;background:var(--card);
+    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;}
+  .runner .rthumb svg{width:38px;height:38px;color:var(--accent2);}
+  .runner.rest .rthumb svg{color:var(--good);}
+  .runner .rname{font-size:20px;font-weight:700;line-height:1.15;}
   .runner .rcat{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-top:3px;}
-  .runner .rart{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px 0;}
-  .runner .rart svg{width:min(42vh,58vw);height:min(42vh,58vw);color:var(--accent2);opacity:.9;}
-  .runner.rest .rart svg{color:var(--good);}
-  .ring{position:relative;width:min(200px,54vw);height:min(200px,54vw);margin:0 auto;}
+  .runner .rmid{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:10px 0;}
+  .ring{position:relative;width:min(100%,64vh);aspect-ratio:1;max-height:100%;margin:0 auto;}
   .ring svg{width:100%;height:100%;transform:rotate(-90deg);}
   .ring .trk{stroke:var(--line)} .ring .prg{stroke:var(--accent);transition:stroke-dashoffset .25s linear}
   .runner.rest .ring .prg{stroke:var(--good)}
   .ring.warn .prg{stroke:var(--warn)}
+  .ring.over .prg{stroke:var(--bad);transition:none}
   .ring .lbl{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-  .ring .tm{font-size:34px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-1px;}
-  .ring .el{font-size:11px;color:var(--muted);}
-  .rctl{display:flex;gap:8px;margin-top:14px;}
+  .ring .tm{font-size:clamp(52px,20vw,96px);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;}
+  .ring.over .tm{color:var(--bad);}
+  .ring .el{font-size:13px;color:var(--muted);margin-top:8px;}
+  /* per-session cue toggles, folded away behind the bell in the top bar */
+  .rcues{margin-top:10px;padding:4px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px;}
+  .rcues.hide{display:none;}
+  .rcues label{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:9px 0;font-size:13px;border-bottom:1px solid var(--line);cursor:pointer;}
+  .rcues label:last-child{border-bottom:none;}
+  .rctl{display:flex;gap:8px;margin-top:10px;}
   .rctl button{flex:1 1 0;padding:13px 6px;font-size:14px;font-weight:700;border-radius:12px;
     border:1px solid var(--line);background:var(--card2);color:var(--txt);cursor:pointer;}
   .rctl button.go{flex:1.5 1 0;background:var(--accent);border-color:var(--accent);color:#06101c;}
@@ -385,11 +395,6 @@
     <div class="card">
       <h2>Body <span class="act" id="goBody">weight &amp; BMI ›</span></h2>
       <div id="bodyCard"></div>
-    </div>
-
-    <div class="card" id="tipCard">
-      <h2>Suggestions <span class="act" id="goTips">more ›</span></h2>
-      <div id="tipsToday"></div>
     </div>
 
     <div class="card" id="reviewCard">
@@ -503,11 +508,6 @@
     </div>
 
     <div class="card">
-      <h2>Suggestions</h2>
-      <div id="tipsAll"></div>
-    </div>
-
-    <div class="card">
       <h2>Personal bests</h2>
       <div id="pbBox"></div>
     </div>
@@ -577,8 +577,10 @@
         <label class="switch"><input type="checkbox" id="setVib"><span class="sl"></span></label></div>
       <div class="field toggle"><span>Keep screen awake</span>
         <label class="switch"><input type="checkbox" id="setWake"><span class="sl"></span></label></div>
-      <div class="field toggle" style="margin-bottom:0"><span>Count down from 3</span>
-        <label class="switch"><input type="checkbox" id="setTick"><span class="sl"></span></label></div>
+      <div id="cueRows"></div>
+      <div class="hint" style="margin-bottom:0">The four cues above are also on the timer
+        screen itself, behind the 🔔 — so you can switch one on mid-workout without
+        leaving the session.</div>
     </div>
     <div class="card">
       <h2>Spreadsheet sync</h2>
@@ -684,7 +686,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "7";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "8";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 4;
 const LSKEY = "anvil.db";
 
@@ -874,6 +876,12 @@ const DEFAULT_EXERCISES = [
   ["Hip Flexor Stretch", "stretch", M, "hipflex", 0, 2.3],
   ["Neck Roll", "stretch", 30, "neckroll", 0, 2.0]
 ];
+// tick = the 3-2-1 countdown; cueMin/cueHalf/cue30 are the optional mid-session
+// bips, off by default because they only earn their keep on longer exercises
+const DEF_SETTINGS = { beep: true, vib: true, wake: true, tick: true, rest: 30,
+  cueMin: false, cueHalf: false, cue30: false,
+  weeklyGoalMin: 60, units: "metric", chime: "classic",
+  syncUrl: "", syncToken: "", syncAuto: false };
 /*</pure>*/
 
 /* ===================== storage ===================== */
@@ -909,9 +917,6 @@ function freshDB() {
     settings: Object.assign({}, DEF_SETTINGS)
   };
 }
-const DEF_SETTINGS = { beep: true, vib: true, wake: true, tick: true, rest: 30,
-  weeklyGoalMin: 60, units: "metric", chime: "classic",
-  syncUrl: "", syncToken: "", syncAuto: false };
 const DEF_PROFILE = { birth: "", heightCm: 0, sex: "" };
 const DEF_MET_BY_NAME = Object.fromEntries(DEFAULT_EXERCISES.map(d => [d[0], d[5]]));
 function migrate(d) {
@@ -1057,6 +1062,14 @@ const CHIMES = {
   none:     { name: "Silent (vibrate only)", notes: [] }
 };
 const CHIME_KEYS = Object.keys(CHIMES);
+/* The four optional cues, in the order they'd fire during a session. One list
+   drives both the in-runner bell panel and the Settings card. */
+const CUE_OPTS = [
+  ["cueMin", "Bip every minute"],
+  ["cueHalf", "Bip at half time"],
+  ["cue30", "Bip at 30s left"],
+  ["tick", "Count down from 3"]
+];
 /*</pure>*/
 function playChime(key, force) {
   const c = CHIMES[key] || CHIMES.classic;
@@ -1066,6 +1079,12 @@ function playChime(key, force) {
 const cueTick = () => { beep(700, 90, .18); buzz(35); };
 const cueDone = () => { playChime(DB.settings.chime); buzz([90, 70, 90, 70, 180]); };
 const cueRest = () => { beep(520, 200, .2); buzz(60); };
+/* Small mid-session bips. Deliberately quieter and shorter than the end chime
+   so there is never a moment's doubt about which one just fired. */
+const cueHalf = () => { beep(880, 70, .15); setTimeout(() => beep(880, 90, .15), 130); buzz(30); };
+const cueMinute = () => { beep(1046, 60, .13); buzz(25); };
+const cue30 = () => { beep(1318, 60, .15); setTimeout(() => beep(1568, 110, .15), 130); buzz([25, 55, 25]); };
+const cuePreview = k => ({ cueMin: cueMinute, cueHalf: cueHalf, cue30: cue30, tick: cueTick }[k] || cueTick)();
 
 /* ===================== wake lock ===================== */
 let wakeLock = null;
@@ -1491,113 +1510,6 @@ function badgeState() {
   });
 }
 
-/* =====================================================================
-   INSIGHTS — observations drawn from your own log, not generic advice.
-   The two guideline anchors are the WHO's public physical-activity
-   recommendations (150 min moderate activity + 2 strength days a week).
-   ===================================================================== */
-function insights() {
-  const out = [];
-  const add = (ic, txt, kind) => out.push({ ic, txt, kind: kind || "info" });
-  const wk = weekKeyOf(new Date());
-  const wkLogs = logsBetween(wk, ymd(addDays(fromYmd(wk), 6)));
-  const mins = Math.round(weekSecs(wk) / 60);
-  const today = midnight();
-
-  // 1. WHO: 150 minutes of moderate-or-better activity a week
-  const modMins = Math.round(wkLogs.filter(l => metOfLog(l) >= 3).reduce((s, l) => s + l.secs, 0) / 60);
-  if (modMins >= 150) add("✅", `${modMins} min of moderate-or-harder activity this week — past the 150 the WHO suggests.`, "good");
-  else add("🎯", `${modMins} of 150 min moderate activity this week (WHO guideline) — ${150 - modMins} to go.`, "info");
-
-  // 2. WHO: strength work on 2+ days a week
-  const strengthDays = new Set(wkLogs.filter(l => l.cat === "dumbbell" || l.cat === "body").map(l => l.date));
-  if (strengthDays.size >= 2) add("💪", `Strength work on ${strengthDays.size} days this week — the guideline is 2.`, "good");
-  else add("💪", `Strength work on ${strengthDays.size} day${strengthDays.size === 1 ? "" : "s"} this week. Two is the usual recommendation.`, "warn");
-
-  // 3. neglected category
-  const lastCat = {};
-  DB.logs.forEach(l => { if (!lastCat[l.cat] || l.date > lastCat[l.cat]) lastCat[l.cat] = l.date; });
-  CATS.forEach(c => {
-    const last = lastCat[c.id];
-    const gap = last ? Math.round((today - fromYmd(last)) / 86400000) : null;
-    if (gap != null && gap >= 14) add("🕸️", `No ${c.name.toLowerCase()} work in ${gap} days — it's the one you skip most.`, "warn");
-  });
-
-  // 4. rest days piling up
-  let restRun = 0;
-  for (let i = 1; i <= 10; i++) { if (secsOn(ymd(addDays(today, -i))) > 0) break; restRun++; }
-  if (restRun >= 3) add("😴", `${restRun} rest days in a row. A short easy session is usually easier to start than a hard one.`, "warn");
-
-  // 5. no rest at all
-  let trainRun = 0;
-  for (let i = 0; i < 14; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
-  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built.`, "warn");
-
-  // 6. this week against your own recent norm
-  let prior = 0;
-  for (let i = 1; i <= 4; i++) prior += weekSecs(ymd(addDays(fromYmd(wk), -7 * i)));
-  const avg = Math.round(prior / 4 / 60);
-  if (avg > 10) {
-    const diff = Math.round((mins - avg) / avg * 100);
-    if (diff <= -30) add("📉", `${mins} min this week vs a ${avg} min average — down ${-diff}%.`, "warn");
-    else if (diff >= 30) add("📈", `${mins} min this week vs a ${avg} min average — up ${diff}%.`, "good");
-  }
-
-  // 7. weight trend and its rate
-  const kg = latestWeightKg();
-  if (kg > 0) {
-    const t7 = weightTrend(7), t30 = weightTrend(30);
-    const d = t7 - t30;
-    if (Math.abs(d) >= 0.3) {
-      const pctPerWeek = Math.abs(d) / kg * 100 / 3;      // ~3 weeks between the window centres
-      const dir = d < 0 ? "down" : "up";
-      if (pctPerWeek > 1) add("⚠️", `Weight is ${dir} ${fmtW(Math.abs(d))} on the trend — that is a fast rate. Around 0.5–1% of bodyweight a week is the usual sustainable range.`, "warn");
-      else add(d < 0 ? "📉" : "📈", `Weight trend is ${dir} ${fmtW(Math.abs(d))} comparing the last week to the last month.`, "info");
-    }
-  }
-  // 8. stale weigh-in
-  const wKeys = weightKeys();
-  if (wKeys.length) {
-    const gap = Math.round((today - fromYmd(wKeys[wKeys.length - 1])) / 86400000);
-    if (gap >= 10) add("⚖️", `Last weigh-in was ${gap} days ago. Weekly is enough — daily is noise.`, "info");
-  } else add("⚖️", "No weigh-ins yet. Without one, calories can't be estimated at all.", "info");
-
-  // 9. waist-to-height
-  const waist = latestWaistCm(), h = DB.profile.heightCm;
-  if (waist > 0 && h > 0) {
-    const r = whtr(waist, h), band = whtrBand(r);
-    if (r >= 0.5) add("📏", `Waist-to-height is ${r.toFixed(2)} (${band.label}). Under 0.5 — waist less than half your height — is the usual target.`, "warn");
-    else add("📏", `Waist-to-height is ${r.toFixed(2)} — ${band.label}.`, "good");
-  } else if (h > 0 && !waist) {
-    add("📏", "Try a waist measurement — it reads body-fat risk better than BMI, which can't tell muscle from fat.", "info");
-  }
-
-  // 10. load that hasn't moved
-  const byEx = {};
-  DB.logs.filter(l => l.load > 0).forEach(l => {
-    (byEx[l.exId] = byEx[l.exId] || []).push(l);
-  });
-  Object.keys(byEx).forEach(id => {
-    const rows = byEx[id].sort((a, b) => a.ts - b.ts);
-    if (rows.length < 8) return;
-    const first = rows[0], last = rows[rows.length - 1];
-    const weeks = (fromYmd(last.date) - fromYmd(first.date)) / 604800000;
-    if (weeks >= 6 && last.load <= first.load) {
-      add("🏋️", `${last.name} has been at ${fmtW(last.load)} for ${Math.round(weeks)} weeks. Adding a little load or a set is how it keeps working.`, "info");
-    }
-  });
-
-  // 11. when you actually train
-  const hours = {};
-  DB.logs.forEach(l => { const h2 = new Date(l.ts).getHours(); hours[h2] = (hours[h2] || 0) + 1; });
-  const top = Object.keys(hours).sort((a, b) => hours[b] - hours[a])[0];
-  if (top != null && DB.logs.length >= 20) {
-    const share = Math.round(hours[top] / DB.logs.length * 100);
-    if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
-  }
-  return out;
-}
-
 function niceMax(v) {
   if (v <= 0) return 10;
   const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1080, 1440, 2160, 2880];
@@ -1609,11 +1521,16 @@ function niceMax(v) {
 /* =====================================================================
    RUNNER — the timer. Wall-clock driven (Date.now deltas) so a locked or
    backgrounded phone doesn't drift the count.
+
+   The clock never stops itself. When it reaches the target it rolls into
+   overtime — counting up, alarm repeating — until you press Stop, and the
+   duration logged is the time you actually spent, overtime included.
    ===================================================================== */
 const RUN = {
   active: false, queue: [], idx: 0, exId: null, dur: 0,
-  startedAt: 0, elapsed: 0, paused: false, resting: false, restLeft: 0,
-  restLen: 0, restEnds: 0, routineName: "", tick: null, lastCue: -1
+  startedAt: 0, elapsed: 0, paused: false, armed: false, over: false,
+  resting: false, restLeft: 0, restLen: 0, restEnds: 0,
+  routineName: "", tick: null, alarm: null, lastCue: -1, fired: {}, cuesOpen: false
 };
 // N sets of one exercise is just a queue of N copies with a rest between —
 // the runner already knows how to walk a queue, so sets cost no new machinery.
@@ -1635,6 +1552,7 @@ function startQueue(ids, rest, name, durOverride) {
   RUN.active = true; RUN.queue = ids.slice(); RUN.idx = 0;
   RUN.restLen = rest || 0; RUN.routineName = name || "";
   RUN.durOverride = durOverride == null ? null : durOverride;
+  RUN.cuesOpen = false;
   acquireWake();
   document.body.style.overflow = "hidden";
   beginCurrent();
@@ -1644,9 +1562,16 @@ function beginCurrent() {
   const ex = exById(RUN.queue[RUN.idx]);
   RUN.exId = ex.id;
   RUN.dur = RUN.durOverride != null ? RUN.durOverride : (ex.dur || 0);
-  RUN.startedAt = Date.now(); RUN.elapsed = 0;
-  RUN.paused = false; RUN.resting = false; RUN.lastCue = -1;
+  armCurrent(false);
   renderRunner();
+}
+// `hold` leaves the clock stopped at zero waiting for Start — that is what
+// Cancel does, and what an armed-but-not-yet-running exercise looks like.
+function armCurrent(hold) {
+  stopAlarm();
+  RUN.startedAt = Date.now(); RUN.elapsed = 0;
+  RUN.paused = false; RUN.resting = false; RUN.over = false;
+  RUN.armed = !!hold; RUN.lastCue = -1; RUN.fired = {};
 }
 function runTick() {
   if (!RUN.active) return;
@@ -1661,54 +1586,96 @@ function runTick() {
     paintRunner();
     return;
   }
-  if (RUN.paused) return;
+  if (RUN.paused || RUN.armed) return;
   RUN.elapsed = (now - RUN.startedAt) / 1000;
   if (RUN.dur) {
     const left = RUN.dur - RUN.elapsed;
-    if (DB.settings.tick && left > 0 && left <= 3) {
-      const s = Math.ceil(left);
-      if (s !== RUN.lastCue) { RUN.lastCue = s; cueTick(); }
-    }
-    if (left <= 0) { finishCurrent(true); return; }
+    if (left > 0) midCues(RUN.elapsed, left);
+    else if (!RUN.over) startOvertime();
   }
   paintRunner();
 }
+/* Optional bips along the way. Each fires once per exercise; `fired` is reset
+   whenever the clock is armed, so a Cancel-and-restart hears them all again. */
+function midCues(el, left) {
+  const s = DB.settings, f = RUN.fired;
+  if (s.tick && left <= 3) {
+    const n = Math.ceil(left);
+    if (n !== RUN.lastCue) { RUN.lastCue = n; cueTick(); }
+  }
+  // half time is only meaningful once there are two halves worth hearing
+  if (s.cueHalf && RUN.dur >= 60 && !f.half && el >= RUN.dur / 2) { f.half = 1; cueHalf(); }
+  if (s.cueMin && RUN.dur > 60) {
+    const m = Math.floor(el / 60);
+    if (m >= 1 && m !== f.min && left > 3) { f.min = m; cueMinute(); }
+  }
+  if (s.cue30 && RUN.dur > 45 && !f.thirty && left <= 30) { f.thirty = 1; cue30(); }
+}
+function startOvertime() {
+  RUN.over = true;
+  cueDone();
+  stopAlarm();
+  // keeps ringing until you deal with it — that is the whole point of overtime
+  RUN.alarm = setInterval(() => { if (!RUN.paused) cueDone(); }, 2600);
+  renderRunner();
+}
+function stopAlarm() { if (RUN.alarm) { clearInterval(RUN.alarm); RUN.alarm = null; } }
 function pauseRun() {
-  if (RUN.resting) return;
+  if (RUN.resting || RUN.armed) return;
   if (RUN.paused) { RUN.startedAt = Date.now() - RUN.elapsed * 1000; RUN.paused = false; }
   else { RUN.elapsed = (Date.now() - RUN.startedAt) / 1000; RUN.paused = true; }
   paintRunner();
+}
+function startArmed() {
+  if (!RUN.armed) return;
+  RUN.armed = false; RUN.startedAt = Date.now(); RUN.elapsed = 0;
+  renderRunner();
+}
+// Cancel: throw this attempt away, put the clock back to the top and wait.
+// There is no undo for a discarded run, so a session with real time on it asks
+// first — the same 20-second threshold End uses.
+function resetRun() {
+  if (RUN.resting) return;
+  const secs = Math.round(elapsedNow());
+  if (secs >= 20 && !confirm(`Throw away the ${mmss(secs)} on the clock and start this one over?`)) return;
+  armCurrent(true);
+  renderRunner();
 }
 function bumpRun(sec) {
   if (RUN.resting) { RUN.restEnds += sec * 1000; RUN.restLeft = Math.max(0, RUN.restEnds - Date.now()) / 1000; paintRunner(); return; }
   if (!RUN.dur) return;                                   // open-ended: nothing to extend
   RUN.dur = Math.max(5, RUN.dur + sec);
-  RUN.lastCue = -1;
+  RUN.lastCue = -1; RUN.fired = {};
+  // pushing the target past the clock pulls you back out of overtime
+  if (RUN.over && RUN.dur > elapsedNow()) { RUN.over = false; stopAlarm(); renderRunner(); return; }
   paintRunner();
 }
-function finishCurrent(auto) {
-  const secs = Math.round(RUN.paused ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000);
-  const used = auto && RUN.dur ? RUN.dur : secs;
-  if (used >= 3) logEntry(RUN.exId, used);                // ignore accidental taps
-  if (auto) cueDone(); else buzz(60);
-  if (RUN.idx >= RUN.queue.length - 1) { stopRun(); toast(`Logged · ${mmss(used)}`); return; }
+const elapsedNow = () => RUN.paused || RUN.armed ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000;
+function finishCurrent() {
+  const secs = Math.round(elapsedNow());
+  stopAlarm();
+  if (secs >= 3) logEntry(RUN.exId, secs);                // ignore accidental taps
+  buzz(60);
+  if (RUN.idx >= RUN.queue.length - 1) { stopRun(); toast(`Logged · ${mmss(secs)}`); return; }
   if (RUN.restLen > 0) {
     RUN.resting = true; RUN.restEnds = Date.now() + RUN.restLen * 1000;
-    RUN.restLeft = RUN.restLen; RUN.lastCue = -1;
+    RUN.restLeft = RUN.restLen; RUN.lastCue = -1; RUN.over = false; RUN.armed = false;
     cueRest(); renderRunner();
   } else { RUN.idx++; beginCurrent(); }
 }
 function stopRun() {
   clearInterval(RUN.tick); RUN.tick = null;
+  stopAlarm();
   RUN.active = false; releaseWake();
   document.body.style.overflow = "";
   const r = $("runner"); if (r) r.remove();
   renderAll();
   if (exViewId) openExercise(exViewId);                   // refresh the page underneath
 }
-function cancelRun() {
-  const secs = Math.round(RUN.paused ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000);
-  if (!RUN.resting && secs >= 20 && confirm(`Log the ${mmss(secs)} you already did?`)) logEntry(RUN.exId, secs);
+function endRun() {
+  const secs = Math.round(elapsedNow());
+  stopAlarm();
+  if (!RUN.resting && !RUN.armed && secs >= 20 && confirm(`Log the ${mmss(secs)} you already did?`)) logEntry(RUN.exId, secs);
   stopRun();
 }
 function renderRunner() {
@@ -1721,49 +1688,71 @@ function renderRunner() {
   r.innerHTML = `
     <div class="rtop">
       <button id="rClose">✕ End</button>
-      <span class="hint" style="margin:0">${RUN.queue.length > 1 && RUN.queue.every(i => i === RUN.queue[0])
-        ? `Set ${RUN.idx + 1} of ${RUN.queue.length}`
-        : `${RUN.routineName ? esc(RUN.routineName) + " · " : ""}${RUN.idx + 1} of ${RUN.queue.length}`}</span>
+      <span class="hint" style="margin:0;flex:1 1 auto;text-align:right">${
+        RUN.queue.length > 1 && RUN.queue.every(i => i === RUN.queue[0])
+          ? `Set ${RUN.idx + 1} of ${RUN.queue.length}`
+          : `${RUN.routineName ? esc(RUN.routineName) + " · " : ""}${RUN.idx + 1} of ${RUN.queue.length}`}</span>
+      <button id="rBell" aria-label="Cue options">🔔</button>
     </div>
     <div class="rprog">${RUN.queue.map((_, i) => {
       const done = resting ? i <= RUN.idx : i < RUN.idx;
       return `<i class="${done ? "done" : (!resting && i === RUN.idx) ? "now" : ""}"></i>`;
     }).join("")}</div>
-    <div class="rname">${resting ? "Rest" : esc(ex.name)}</div>
-    <div class="rcat">${resting
-      ? `Next: ${nextEx ? esc(nextEx.name) : "—"}`
-      : `<span class="dot" style="background:${catColor(ex.cat)}"></span>${esc(catName(ex.cat))}`}</div>
-    <div class="rart">${art(resting ? "rest" : ex.art)}</div>
-    <div class="ring" id="rRing">
-      <svg viewBox="0 0 120 120">
-        <circle class="trk" cx="60" cy="60" r="52" fill="none" stroke-width="9"/>
-        <circle class="prg" id="rPrg" cx="60" cy="60" r="52" fill="none" stroke-width="9"
-          stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"/>
-      </svg>
-      <div class="lbl"><div class="tm" id="rTime">0:00</div><div class="el" id="rSub"></div></div>
+    <div class="rhead">
+      <div class="rthumb">${art(resting ? "rest" : ex.art)}</div>
+      <div style="min-width:0">
+        <div class="rname">${resting ? "Rest" : esc(ex.name)}</div>
+        <div class="rcat">${resting
+          ? `Next: ${nextEx ? esc(nextEx.name) : "—"}`
+          : `<span class="dot" style="background:${catColor(ex.cat)}"></span>${esc(catName(ex.cat))}`}</div>
+      </div>
     </div>
-    <div class="rctl">${controls()}</div>`;
-  function controls() {
-    if (resting) return `
-      <button id="rMinus">−15s</button>
-      <button id="rPlus">+15s</button>
-      <button class="go" id="rSkipRest">Skip rest ›</button>`;
-    return `
-      <button id="rMinus">−30s</button>
-      <button id="rPause">${RUN.paused ? "▶" : "❚❚"}</button>
-      <button id="rPlus">+30s</button>
-      <button class="go" id="rDone">${RUN.idx < RUN.queue.length - 1 ? "Done ›" : "Done ✓"}</button>`;
+    <div class="rcues${RUN.cuesOpen ? "" : " hide"}" id="rCues">${CUE_OPTS.map(([k, lab]) => `
+      <label><span>${lab}</span>
+        <span class="switch"><input type="checkbox" data-cue="${k}"${DB.settings[k] ? " checked" : ""}><span class="sl"></span></span>
+      </label>`).join("")}</div>
+    <div class="rmid">
+      <div class="ring" id="rRing">
+        <svg viewBox="0 0 120 120">
+          <circle class="trk" cx="60" cy="60" r="52" fill="none" stroke-width="7"/>
+          <circle class="prg" id="rPrg" cx="60" cy="60" r="52" fill="none" stroke-width="7"
+            stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"/>
+        </svg>
+        <div class="lbl"><div class="tm" id="rTime">0:00</div><div class="el" id="rSub"></div></div>
+      </div>
+    </div>
+    <div class="rctl">
+      <button id="rMinus">−${resting ? 15 : 30}s</button>
+      ${resting || RUN.armed ? "" : `<button id="rPause">${RUN.paused ? "▶" : "❚❚"}</button>`}
+      <button id="rPlus">+${resting ? 15 : 30}s</button>
+    </div>
+    <div class="rctl">${mainRow()}</div>`;
+  function mainRow() {
+    if (resting) return `<button class="go" id="rSkipRest">Skip rest ›</button>`;
+    if (RUN.armed) return `<button class="go" id="rStart">Start ▶</button>`;
+    const last = RUN.idx >= RUN.queue.length - 1;
+    return `<button id="rCancel">Cancel</button>
+      <button class="go" id="rDone">${RUN.over ? (last ? "Stop ✓" : "Stop ›") : (last ? "Done ✓" : "Done ›")}</button>`;
   }
-  $("rClose").onclick = cancelRun;
+  $("rClose").onclick = endRun;
+  $("rBell").onclick = () => {
+    RUN.cuesOpen = !RUN.cuesOpen;
+    $("rCues").classList.toggle("hide", !RUN.cuesOpen);
+  };
+  $("rCues").querySelectorAll("[data-cue]").forEach(c => c.onchange = () => {
+    DB.settings[c.dataset.cue] = c.checked; save(true);
+    if (c.checked) cuePreview(c.dataset.cue);
+  });
+  $("rMinus").onclick = () => bumpRun(resting ? -15 : -30);
+  $("rPlus").onclick = () => bumpRun(resting ? 15 : 30);
   if (resting) {
-    $("rMinus").onclick = () => bumpRun(-15);
-    $("rPlus").onclick = () => bumpRun(15);
     $("rSkipRest").onclick = () => { RUN.idx++; beginCurrent(); };
+  } else if (RUN.armed) {
+    $("rStart").onclick = startArmed;
   } else {
-    $("rMinus").onclick = () => bumpRun(-30);
-    $("rPlus").onclick = () => bumpRun(30);
     $("rPause").onclick = () => { pauseRun(); renderRunner(); };
-    $("rDone").onclick = () => finishCurrent(false);
+    $("rCancel").onclick = resetRun;
+    $("rDone").onclick = finishCurrent;
   }
   paintRunner();
 }
@@ -1775,21 +1764,29 @@ function paintRunner() {
     t.textContent = mmss(RUN.restLeft);
     sub.textContent = "rest";
     p.style.strokeDashoffset = String(C * (1 - (RUN.restLen ? RUN.restLeft / RUN.restLen : 0)));
-    ring.classList.remove("warn");
+    ring.className = "ring";
     return;
   }
-  const el = RUN.paused ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000;
+  const el = elapsedNow();
+  if (RUN.dur && RUN.over) {
+    // past the target: the ring is full, the clock counts the overrun
+    t.textContent = "+" + mmss(el - RUN.dur);
+    sub.textContent = RUN.paused ? "paused" : `over ${durLabel(RUN.dur)} — press Stop`;
+    p.style.strokeDashoffset = "0";
+    ring.className = "ring over";
+    return;
+  }
   if (RUN.dur) {
     const left = Math.max(0, RUN.dur - el);
     t.textContent = mmss(left);
-    sub.textContent = RUN.paused ? "paused" : `of ${durLabel(RUN.dur)}`;
+    sub.textContent = RUN.armed ? `ready · ${durLabel(RUN.dur)}` : RUN.paused ? "paused" : `of ${durLabel(RUN.dur)}`;
     p.style.strokeDashoffset = String(C * (1 - left / RUN.dur));
-    ring.classList.toggle("warn", left <= 10);
+    ring.className = "ring" + (left <= 10 && !RUN.armed ? " warn" : "");
   } else {
     t.textContent = mmss(el);
-    sub.textContent = RUN.paused ? "paused" : "counting up";
+    sub.textContent = RUN.armed ? "ready" : RUN.paused ? "paused" : "counting up";
     p.style.strokeDashoffset = String(C * (1 - (el % 60) / 60));
-    ring.classList.remove("warn");
+    ring.className = "ring";
   }
 }
 
@@ -1862,8 +1859,8 @@ function renderToday() {
   const tk = todayStr();
   const mine = logsOn(tk);
   const secs = sumSecs(mine);
-  $("todayNum").textContent = minsOf(secs);
-  $("todayUnit").textContent = minsOf(secs) === 1 ? "minute" : "minutes";
+  $("todayNum").textContent = mmss(secs);
+  $("todayUnit").textContent = secs >= 3600 ? "hours : minutes : seconds" : "minutes : seconds";
   $("tdCount").textContent = mine.length;
 
   const wk = weekKeyOf(new Date());
@@ -1887,7 +1884,6 @@ function renderToday() {
 
   renderStreaks();
   renderWeekGoal();
-  renderInsights("tipsToday", 3);
   // the weekly review is worth reading while last week is still fresh; after
   // Wednesday it just crowds Today, and it stays permanently on History
   const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
@@ -2490,15 +2486,6 @@ function renderBadges(elId, compact) {
              <div class="bp">${Math.floor(x.val)} / ${x.goal}</div>`}
       </div>`).join("")}</div>`;
 }
-function renderInsights(elId, limit) {
-  const el = $(elId); if (!el) return;
-  const all = insights();
-  const list = limit ? all.slice(0, limit) : all;
-  el.innerHTML = list.length
-    ? list.map(i => `<div class="tip ${i.kind}"><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
-    : `<div class="empty">Log a few sessions and suggestions will show up here.</div>`;
-}
-
 /* ---------- CALENDAR ---------- */
 function renderCal() {
   const { from, to } = monthRange(calY, calM);
@@ -2716,7 +2703,6 @@ function renderHistory() {
   }
   $("reviewHist").innerHTML = weekReviewHTML(ymd(addDays(fromYmd(weekKeyOf(new Date())), -7)));
   renderBadges("badgeBox", false);
-  renderInsights("tipsAll", 0);
 
   const avgs = sums.map((s, i) => counts[i] ? s / counts[i] / 60 : 0);
   const amax = Math.max(1, ...avgs);
@@ -3258,7 +3244,16 @@ function syncAutoPush() {
 function renderSettings() {
   const s = DB.settings, pr = DB.profile;
   $("setBeep").checked = s.beep; $("setVib").checked = s.vib;
-  $("setWake").checked = s.wake; $("setTick").checked = s.tick;
+  $("setWake").checked = s.wake;
+  // same CUE_OPTS list the runner's bell panel renders from
+  $("cueRows").innerHTML = CUE_OPTS.map(([k, lab]) => `
+    <div class="field toggle"><span>${lab}</span>
+      <label class="switch"><input type="checkbox" data-cue="${k}"${s[k] ? " checked" : ""}><span class="sl"></span></label>
+    </div>`).join("");
+  $("cueRows").querySelectorAll("[data-cue]").forEach(c => c.onchange = () => {
+    DB.settings[c.dataset.cue] = c.checked; save();
+    if (c.checked) cuePreview(c.dataset.cue);
+  });
   $("setWeekly").value = s.weeklyGoalMin;
   $("setUnits").value = s.units;
   $("setBirth").value = pr.birth || "";
@@ -3419,7 +3414,6 @@ function boot() {
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
   $("fab").onclick = () => editExercise(null);
   $("goExercises").onclick = () => showTab("ex");
-  $("goTips").onclick = () => showTab("history");
   $("goReview").onclick = () => showTab("history");
   $("editToday").onclick = () => openDayEdit(todayStr());
   $("goBody").onclick = openBody;
@@ -3457,7 +3451,7 @@ function boot() {
 
   const bindToggle = (id, key) => $(id).onchange = e => { DB.settings[key] = e.target.checked; save(); };
   bindToggle("setBeep", "beep"); bindToggle("setVib", "vib");
-  bindToggle("setWake", "wake"); bindToggle("setTick", "tick");
+  bindToggle("setWake", "wake");
   $("setUnits").onchange = e => { DB.settings.units = e.target.value; save(true); renderAll(); if (bodyOpen) paintBody(); };
   $("setBirth").onchange = e => { DB.profile.birth = e.target.value; save(true); renderSettings(); renderToday(); };
   $("setSex").onchange = e => { DB.profile.sex = e.target.value; save(true); renderSettings(); };
