@@ -147,17 +147,18 @@
   .dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto;}
 
   /* ---- routine grid (Today) ---- */
-  .exgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
-  @media(min-width:520px){.exgrid{grid-template-columns:repeat(4,1fr);}}
+  /* four across on a phone — twelve tiles then read as three tidy rows */
+  .exgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;}
+  @media(min-width:520px){.exgrid{grid-template-columns:repeat(6,1fr);}}
   .extile{background:var(--card2);border:1px solid var(--line);border-radius:14px;padding:8px 6px 7px;
     cursor:pointer;text-align:center;position:relative;overflow:hidden;}
   .extile:active{transform:scale(.97)}
   .extile::after{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--catc);}
   .extile .a{width:100%;aspect-ratio:1;padding:2px;color:var(--accent2);}
-  .extile .n{font-size:11.5px;font-weight:700;line-height:1.2;margin-top:2px;
+  .extile .n{font-size:10.5px;font-weight:700;line-height:1.2;margin-top:2px;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:28px;}
-  .extile .d{font-size:10.5px;color:var(--txt);opacity:.85;}
-  .extile .w{font-size:9.5px;color:var(--muted);margin-top:1px;}
+  .extile .d{font-size:9.5px;color:var(--txt);opacity:.85;}
+  .extile .w{font-size:9px;color:var(--muted);margin-top:1px;}
 
   /* ---- today's logged sessions, 4 across ---- */
   .loggrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px;}
@@ -322,12 +323,21 @@
   .ring .tm{font-size:clamp(52px,20vw,96px);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;}
   .ring.over .tm{color:var(--bad);}
   .ring .el{font-size:13px;color:var(--muted);margin-top:8px;}
-  /* per-session cue toggles, folded away behind the bell in the top bar */
+  /* the exercise's cue toggles, folded away behind the bell in the top bar.
+     Same .cuerow markup renders on the exercise page, so the two can't drift. */
   .rcues{margin-top:10px;padding:4px 12px;background:var(--card);border:1px solid var(--line);border-radius:14px;}
   .rcues.hide{display:none;}
-  .rcues label{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  .cuerow{display:flex;align-items:center;justify-content:space-between;gap:10px;
     padding:9px 0;font-size:13px;border-bottom:1px solid var(--line);cursor:pointer;}
-  .rcues label:last-child{border-bottom:none;}
+  .cuerow:last-child{border-bottom:none;}
+  .daybar{display:flex;gap:2px;height:12px;border-radius:6px;overflow:hidden;margin:10px 0 6px;}
+  .daybar i{display:block;min-width:3px;}
+  .daykey{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--muted);}
+  .daykey i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;}
+  .tip{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--line);font-size:12.5px;line-height:1.45;}
+  .tip:last-child{border-bottom:none;}
+  .tip .ti{flex:0 0 auto;font-size:15px;line-height:1.3;}
+  .tip.good{color:var(--good)} .tip.warn{color:var(--warn)} .tip.info{color:var(--txt)}
   .rctl{display:flex;gap:8px;margin-top:10px;}
   .rctl button{flex:1 1 0;padding:13px 6px;font-size:14px;font-weight:700;border-radius:12px;
     border:1px solid var(--line);background:var(--card2);color:var(--txt);cursor:pointer;}
@@ -410,6 +420,12 @@
     <div class="card" id="chainCard">
       <h2>Circuits <span class="act" id="newChain">+ new</span></h2>
       <div id="chainList"></div>
+    </div>
+
+    <!-- last card on the page: read it once the day is done, not before -->
+    <div class="card" id="tipCard">
+      <h2>Suggestions</h2>
+      <div id="tipsToday"></div>
     </div>
   </section>
 
@@ -537,8 +553,11 @@
         <label for="setWeekly">Default weekly goal (minutes)</label>
         <input type="number" id="setWeekly" min="0" max="10000" step="15">
       </div>
+      <div class="field"><label for="setStart">First day</label>
+        <input type="date" id="setStart" max="2036-12-31"></div>
       <div class="hint">Each week stores its own goal the first time you change it from the Today tab,
-        so past weeks keep the target you actually had.</div>
+        so past weeks keep the target you actually had. The month and year targets only count
+        from your first day, so a year you joined in July isn't judged against all twelve months.</div>
     </div>
     <div class="card">
       <h2>You</h2>
@@ -557,9 +576,16 @@
           <option value="m">Male</option>
           <option value="f">Female</option>
         </select></div>
+      <div class="btnrow">
+        <div class="field" style="flex:1"><label for="setDesk">Hours at a desk / day</label>
+          <input type="number" id="setDesk" min="0" max="16" step="1"></div>
+        <div class="field" style="flex:1"><label for="setSleep">Hours asleep / night</label>
+          <input type="number" id="setSleep" min="0" max="14" step="1"></div>
+      </div>
       <div class="hint" style="margin-top:0">Age, height and sex are only used locally to work
         out BMI and the Mifflin-St Jeor resting-burn formula. Leaving sex unset takes the
-        midpoint of the two constants, which costs the estimate about 80 kcal/day.</div>
+        midpoint of the two constants, which costs the estimate about 80 kcal/day.
+        Desk and sleep hours shape the daily-burn estimate on the Body page.</div>
       <div class="hint" id="setBodyOut"></div>
     </div>
 
@@ -577,10 +603,8 @@
         <label class="switch"><input type="checkbox" id="setVib"><span class="sl"></span></label></div>
       <div class="field toggle"><span>Keep screen awake</span>
         <label class="switch"><input type="checkbox" id="setWake"><span class="sl"></span></label></div>
-      <div id="cueRows"></div>
-      <div class="hint" style="margin-bottom:0">The four cues above are also on the timer
-        screen itself, behind the 🔔 — so you can switch one on mid-workout without
-        leaving the session.</div>
+      <div class="hint" style="margin-bottom:0">Countdown and mid-session beeps are set
+        per exercise — open one from the Exercises tab, or tap 🔔 on the timer screen.</div>
     </div>
     <div class="card">
       <h2>Spreadsheet sync</h2>
@@ -686,8 +710,8 @@
 
 <script>
 "use strict";
-const APP_VERSION = "8";          // keep equal to CACHE in sw.js; bump every change
-const SCHEMA_VERSION = 4;
+const APP_VERSION = "9";          // keep equal to CACHE in sw.js; bump every change
+const SCHEMA_VERSION = 5;
 const LSKEY = "anvil.db";
 
 /* =====================================================================
@@ -714,6 +738,7 @@ const ART = {
   jumprope: `<path d="M36 40C16 54 20 84 50 84s34-30 14-44" stroke-width="3" opacity=".55"/>`
     + H(50,14) + `<path d="M50 21v25M50 27L36 40M50 27l14 13M50 46l-7 14 3 10M50 46l7 14-3 10"/>`,
   run: H(62,17) + `<path d="M60 24L47 49M56 30l14 10-6 10M56 30l-12-3-6 9M47 49L34 62l4 14M47 49l9 17 14 6"/>` + GND(90),
+  walk: H(52,15) + `<path d="M52 22v28M52 28l-11 12 3 10M52 28l12 9-2 12M52 50l-8 18-2 20M52 50l10 17 8 15"/>` + GND(90),
   jack: H(50,15) + `<path d="M50 22v30M50 29L30 13M50 29l20-16M50 52L34 84M50 52l16 32"/>`,
   // drawn at the jump — arms straight up together, which is what separates it
   // from a jumping jack (arms out) at a glance
@@ -818,55 +843,62 @@ const catName  = id => (CAT[id] || {}).name  || "Other";
 /* ===================== default library ===================== */
 /*<pure:defaults>*/
 const M = 60;
-// [name, category, seconds, art, favourite, MET]
+// [name, category, seconds, art, favourite, MET, km/h, reps/min]
+// A pace is only given where the exercise covers ground; it turns minutes into
+// kilometres for the distance milestones. Both are the Compendium's own speeds
+// for the MET beside them: 3.5 METs is a 4.8 km/h walk, 9.8 is a 9.7 km/h run.
+// A cadence is a steady working pace for the movement, and it is what lets an
+// exercise count reps — and, once you enter a load, tonnes. Holds (planks,
+// wall sits, every stretch) get none: there is nothing there to count but time.
 // MET values are from the 2011 Compendium of Physical Activities — they are the
 // published metabolic cost of the activity, not a guess, and they drive the
 // calorie estimate. Editable per exercise.
 const CAT_MET = { cardio: 7, dumbbell: 4, body: 4.5, core: 3.5, stretch: 2.3 };
 const DEFAULT_EXERCISES = [
   // cardio
-  ["Jump Rope", "cardio", 10*M, "jumprope", 1, 11.8],
-  ["Running", "cardio", 20*M, "run", 0, 9.8],
-  ["Jumping Jacks", "cardio", M, "jack", 1, 8.0],
-  ["Burpees", "cardio", M, "burpee", 0, 8.0],
-  ["Mountain Climbers", "cardio", M, "climber", 0, 8.0],
-  ["High Knees", "cardio", 45, "knees", 0, 8.0],
+  ["Jump Rope", "cardio", 10*M, "jumprope", 1, 11.8, 0, 110],
+  ["Running", "cardio", 20*M, "run", 0, 9.8, 9.7],
+  ["Walking", "cardio", 30*M, "walk", 1, 3.5, 4.8],
+  ["Jumping Jacks", "cardio", M, "jack", 1, 8.0, 0, 50],
+  ["Burpees", "cardio", M, "burpee", 0, 8.0, 0, 15],
+  ["Mountain Climbers", "cardio", M, "climber", 0, 8.0, 0, 60],
+  ["High Knees", "cardio", 45, "knees", 0, 8.0, 0, 100],
   ["Cycling", "cardio", 20*M, "bike", 0, 7.5],
   ["Rowing", "cardio", 10*M, "rowmachine", 0, 7.0],
-  ["Shadow Boxing", "cardio", 3*M, "box", 0, 7.8],
+  ["Shadow Boxing", "cardio", 3*M, "box", 0, 7.8, 0, 60],
   // dumbbell
-  ["Bicep Curl", "dumbbell", M, "curl", 1, 3.5],
-  ["Hammer Curl", "dumbbell", M, "hammer", 0, 3.5],
-  ["Side Raise", "dumbbell", M, "sideraise", 1, 3.5],
-  ["Front Raise", "dumbbell", M, "frontraise", 0, 3.5],
-  ["Shoulder Press", "dumbbell", M, "press", 1, 5.0],
-  ["Bent-Over Row", "dumbbell", M, "bentrow", 0, 5.0],
-  ["Chest Press", "dumbbell", M, "chestpress", 0, 5.0],
-  ["Tricep Extension", "dumbbell", M, "tricep", 0, 3.5],
-  ["Shrug", "dumbbell", 45, "shrug", 0, 3.5],
-  ["Goblet Squat", "dumbbell", M, "goblet", 0, 5.0],
-  ["Deadlift", "dumbbell", M, "deadlift", 0, 6.0],
-  ["Kettlebell Swing", "dumbbell", M, "kb", 0, 9.8],
-  ["Renegade Row", "dumbbell", M, "renegade", 0, 8.0],
+  ["Bicep Curl", "dumbbell", M, "curl", 1, 3.5, 0, 25],
+  ["Hammer Curl", "dumbbell", M, "hammer", 0, 3.5, 0, 25],
+  ["Side Raise", "dumbbell", M, "sideraise", 1, 3.5, 0, 20],
+  ["Front Raise", "dumbbell", M, "frontraise", 0, 3.5, 0, 20],
+  ["Shoulder Press", "dumbbell", M, "press", 1, 5.0, 0, 20],
+  ["Bent-Over Row", "dumbbell", M, "bentrow", 0, 5.0, 0, 20],
+  ["Chest Press", "dumbbell", M, "chestpress", 0, 5.0, 0, 20],
+  ["Tricep Extension", "dumbbell", M, "tricep", 0, 3.5, 0, 25],
+  ["Shrug", "dumbbell", 45, "shrug", 0, 3.5, 0, 30],
+  ["Goblet Squat", "dumbbell", M, "goblet", 0, 5.0, 0, 18],
+  ["Deadlift", "dumbbell", M, "deadlift", 0, 6.0, 0, 12],
+  ["Kettlebell Swing", "dumbbell", M, "kb", 0, 9.8, 0, 30],
+  ["Renegade Row", "dumbbell", M, "renegade", 0, 8.0, 0, 15],
   // bodyweight
-  ["Push-Up", "body", M, "pushup", 1, 8.0],
-  ["Squat", "body", M, "squat", 1, 5.0],
-  ["Lunge", "body", M, "lunge", 0, 4.0],
-  ["Pull-Up", "body", 45, "pullup", 0, 8.0],
-  ["Dip", "body", 45, "dip", 0, 8.0],
+  ["Push-Up", "body", M, "pushup", 1, 8.0, 0, 25],
+  ["Squat", "body", M, "squat", 1, 5.0, 0, 25],
+  ["Lunge", "body", M, "lunge", 0, 4.0, 0, 20],
+  ["Pull-Up", "body", 45, "pullup", 0, 8.0, 0, 10],
+  ["Dip", "body", 45, "dip", 0, 8.0, 0, 15],
   ["Wall Sit", "body", M, "wallsit", 0, 4.0],
-  ["Calf Raise", "body", 45, "calf", 0, 3.5],
-  ["Glute Bridge", "body", M, "bridge", 0, 3.5],
+  ["Calf Raise", "body", 45, "calf", 0, 3.5, 0, 35],
+  ["Glute Bridge", "body", M, "bridge", 0, 3.5, 0, 25],
   // core
   ["Plank", "core", M, "plank", 1, 3.3],
   ["Side Plank", "core", 45, "sideplank", 0, 3.3],
-  ["Sit-Up", "core", M, "situp", 0, 4.3],
-  ["Crunch", "core", M, "crunch", 0, 3.8],
-  ["Leg Raise", "core", M, "legraise", 0, 3.8],
-  ["Russian Twist", "core", M, "twist", 0, 4.0],
-  ["Bicycle Crunch", "core", M, "bicycle", 0, 4.3],
+  ["Sit-Up", "core", M, "situp", 0, 4.3, 0, 25],
+  ["Crunch", "core", M, "crunch", 0, 3.8, 0, 30],
+  ["Leg Raise", "core", M, "legraise", 0, 3.8, 0, 20],
+  ["Russian Twist", "core", M, "twist", 0, 4.0, 0, 40],
+  ["Bicycle Crunch", "core", M, "bicycle", 0, 4.3, 0, 40],
   ["Superman", "core", 45, "superman", 0, 3.0],
-  ["Dead Bug", "core", M, "deadbug", 0, 3.0],
+  ["Dead Bug", "core", M, "deadbug", 0, 3.0, 0, 20],
   // stretch
   ["Hamstring Stretch", "stretch", M, "hamstring", 0, 2.3],
   ["Shoulder Stretch", "stretch", 45, "shoulderstr", 0, 2.3],
@@ -876,12 +908,24 @@ const DEFAULT_EXERCISES = [
   ["Hip Flexor Stretch", "stretch", M, "hipflex", 0, 2.3],
   ["Neck Roll", "stretch", 30, "neckroll", 0, 2.0]
 ];
-// tick = the 3-2-1 countdown; cueMin/cueHalf/cue30 are the optional mid-session
-// bips, off by default because they only earn their keep on longer exercises
-const DEF_SETTINGS = { beep: true, vib: true, wake: true, tick: true, rest: 30,
-  cueMin: false, cueHalf: false, cue30: false,
+const DEF_SETTINGS = { beep: true, vib: true, wake: true, rest: 30,
   weeklyGoalMin: 60, units: "metric", chime: "classic",
   syncUrl: "", syncToken: "", syncAuto: false };
+/* Timer cues belong to the exercise, not the app: a 30-second countdown makes
+   sense on a 10-minute rope but is noise on a 1-minute curl. One list renders
+   both the exercise page and the runner's bell panel, in the order the user
+   reads them rather than the order they fire. */
+const CUE_OPTS = [
+  ["tick", "3-second countdown"],
+  ["half", "Beep at half time"],
+  ["min", "Beep every minute"],
+  ["s30", "Beep at 30s left"]
+];
+/* deskHours/sleepHours shape the daily-burn estimate; startDate is the day you
+   began, so the first year is judged on the part of it you were actually here for. */
+const DEF_PROFILE = { birth: "", heightCm: 0, sex: "", deskHours: 8, sleepHours: 8, startDate: "" };
+const DEF_CUES = { tick: true, half: false, min: false, s30: false };
+const cuesOf = ex => Object.assign({}, DEF_CUES, (ex && ex.cues) || {});
 /*</pure>*/
 
 /* ===================== storage ===================== */
@@ -890,9 +934,10 @@ let seq = 0;
 const uid = p => `${p}_${Date.now().toString(36)}_${(seq++).toString(36)}`;
 
 function seedExercises() {
-  return DEFAULT_EXERCISES.map(([name, cat, dur, a, fav, met], i) =>
+  return DEFAULT_EXERCISES.map(([name, cat, dur, a, fav, met, kmh, rate], i) =>
     ({ id: uid("ex"), name, cat, dur, art: a, fav: !!fav, ord: i, arch: false, note: "",
-       met, load: 0, rate: 0, sets: 1, setRest: 60 }));
+       met, load: 0, rate: rate || 0, kmh: kmh || 0, sets: 1, setRest: 60,
+       cues: Object.assign({}, DEF_CUES) }));
 }
 function freshDB() {
   const ex = seedExercises();
@@ -917,8 +962,9 @@ function freshDB() {
     settings: Object.assign({}, DEF_SETTINGS)
   };
 }
-const DEF_PROFILE = { birth: "", heightCm: 0, sex: "" };
 const DEF_MET_BY_NAME = Object.fromEntries(DEFAULT_EXERCISES.map(d => [d[0], d[5]]));
+const DEF_KMH_BY_NAME = Object.fromEntries(DEFAULT_EXERCISES.map(d => [d[0], d[6] || 0]));
+const DEF_RATE_BY_NAME = Object.fromEntries(DEFAULT_EXERCISES.map(d => [d[0], d[7] || 0]));
 function migrate(d) {
   d.v = SCHEMA_VERSION;
   d.logs = d.logs || [];
@@ -936,9 +982,20 @@ function migrate(d) {
     if (!(e.met > 0)) e.met = DEF_MET_BY_NAME[e.name] || CAT_MET[e.cat] || 4;
     if (e.load == null) e.load = 0;
     if (e.rate == null) e.rate = 0;
+    // v5: a shipped cadence, so rep-shaped exercises can count reps and tonnes
+    if (!(e.rate > 0)) e.rate = DEF_RATE_BY_NAME[e.name] || 0;
+    // v5: a walking pace, so the ones that cover ground can count kilometres
+    if (e.kmh == null) e.kmh = (DEF_KMH_BY_NAME[e.name] || 0);
     if (!(e.sets > 0)) e.sets = 1;                       // v4: repeated sets with a rest between
     if (!(e.setRest >= 0)) e.setRest = 60;
+    // v5: timer cues moved from one global setting to one set per exercise.
+    // Carry the old global across so nobody's countdown silently switches off.
+    if (!e.cues) e.cues = Object.assign({}, DEF_CUES,
+      d.settings.tick === false ? { tick: false } : null);
   });
+  // the settings they used to live in are gone; drop them rather than keep
+  // a second copy that nothing reads
+  ["tick", "cueMin", "cueHalf", "cue30"].forEach(k => delete d.settings[k]);
   return d;
 }
 function load() {
@@ -993,6 +1050,14 @@ function durLabel(sec) {
 }
 const minsOf = secs => Math.round(secs / 60);
 const fmtH = secs => (Math.round(secs / 360) / 10).toString();     // seconds → hours, 1 dp
+/* Durations read as hours and minutes, never as a decimal: "1h30", not "1.5h".
+   Half an hour is thirty minutes, and that is how a clock says it. */
+function fmtHM(mins) {
+  const m = Math.max(0, Math.round(mins));
+  if (m < 60) return m + "min";
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? `${h}h${pad2(r)}` : `${h}h`;
+}
 const exById = id => DB.exercises.find(e => e.id === id);
 /*</pure>*/
 function toast(msg, kind) {
@@ -1062,14 +1127,6 @@ const CHIMES = {
   none:     { name: "Silent (vibrate only)", notes: [] }
 };
 const CHIME_KEYS = Object.keys(CHIMES);
-/* The four optional cues, in the order they'd fire during a session. One list
-   drives both the in-runner bell panel and the Settings card. */
-const CUE_OPTS = [
-  ["cueMin", "Bip every minute"],
-  ["cueHalf", "Bip at half time"],
-  ["cue30", "Bip at 30s left"],
-  ["tick", "Count down from 3"]
-];
 /*</pure>*/
 function playChime(key, force) {
   const c = CHIMES[key] || CHIMES.classic;
@@ -1084,7 +1141,25 @@ const cueRest = () => { beep(520, 200, .2); buzz(60); };
 const cueHalf = () => { beep(880, 70, .15); setTimeout(() => beep(880, 90, .15), 130); buzz(30); };
 const cueMinute = () => { beep(1046, 60, .13); buzz(25); };
 const cue30 = () => { beep(1318, 60, .15); setTimeout(() => beep(1568, 110, .15), 130); buzz([25, 55, 25]); };
-const cuePreview = k => ({ cueMin: cueMinute, cueHalf: cueHalf, cue30: cue30, tick: cueTick }[k] || cueTick)();
+const cuePreview = k => ({ min: cueMinute, half: cueHalf, s30: cue30, tick: cueTick }[k] || cueTick)();
+
+/* One list, two homes: the runner's bell panel and the exercise page both render
+   these rows, so a cue can never mean one thing in one place and another in the
+   other. Both write straight to the exercise, which is where cues now live. */
+const cueRowsHTML = cues => CUE_OPTS.map(([k, lab]) => `
+  <label class="cuerow"><span>${lab}</span>
+    <span class="switch"><input type="checkbox" data-cue="${k}"${cues[k] ? " checked" : ""}><span class="sl"></span></span>
+  </label>`).join("");
+
+function bindCueRows(host, exId) {
+  if (!host) return;
+  host.querySelectorAll("[data-cue]").forEach(c => c.onchange = () => {
+    const ex = exById(exId); if (!ex) return;
+    ex.cues = Object.assign(cuesOf(ex), { [c.dataset.cue]: c.checked });
+    save(true);
+    if (c.checked) cuePreview(c.dataset.cue);
+  });
+}
 
 /* ===================== wake lock ===================== */
 let wakeLock = null;
@@ -1152,9 +1227,31 @@ const weekMet = mondayKey => {
 };
 // A month's target is the sum of its days' share of whatever weekly goal that day fell under,
 // so changing the goal mid-month is reflected honestly rather than retro-applied.
+/* You weren't here before your first day. Judging a year you began in July
+   against all twelve months makes every number look like a failure, so both the
+   target and the pace fraction start from that day. Falling back to the first
+   logged session means this is right even if the setting is never touched. */
+const startDate = () => (DB.profile && DB.profile.startDate) || firstLogDate() || "";
+// days in [fromK, toK] that are on or after the first day
+function goalDays(fromK, toK) {
+  const s = startDate();
+  const a = s && s > fromK ? s : fromK;
+  if (a > toK) return 0;
+  return Math.round((fromYmd(toK) - fromYmd(a)) / 86400000) + 1;
+}
+// of those, the ones that have already been and gone
+function goalDaysElapsed(fromK, toK) {
+  const t = todayStr();
+  return goalDays(fromK, t < toK ? t : toK);
+}
 function monthGoalMin(y, m) {
+  const s = startDate();
   let t = 0;
-  for (let d = 1; d <= daysInMonth(y, m); d++) t += weekGoalMin(weekKeyOf(new Date(y, m, d))) / 7;
+  for (let d = 1; d <= daysInMonth(y, m); d++) {
+    const day = new Date(y, m, d);
+    if (s && ymd(day) < s) continue;
+    t += weekGoalMin(weekKeyOf(day)) / 7;
+  }
   return t;
 }
 function yearGoalMin(y) {
@@ -1333,6 +1430,37 @@ function bmr(kg, cm, age, sex) {
   return 10 * kg + 6.25 * cm - 5 * age + s;
 }
 
+/* ---- the whole day ----
+   A desk day and an on-your-feet day burn very differently, and the usual
+   "BMR × 1.2 if sedentary" multiplier hides that behind one number. Build the
+   day out of MET-hours instead — sleep, hours at the computer, the rest of the
+   waking day, plus the sessions actually logged — and let the multiplier fall
+   out of it: PAL = MET-hours ÷ 24, daily burn = BMR × PAL.
+   The MET values are the Compendium's: sleeping 0.95, desk work 1.5, and 1.8
+   for ordinary pottering about (cooking, errands, standing, walking indoors). */
+const MET_SLEEP = 0.95, MET_DESK = 1.5, MET_AWAKE = 1.8;
+function dayHours(deskH, sleepH, exH) {
+  const sleep = Math.min(16, Math.max(0, sleepH || 0));
+  const desk = Math.min(24 - sleep, Math.max(0, deskH || 0));
+  const ex = Math.min(24 - sleep - desk, Math.max(0, exH || 0));
+  return { sleep, desk, ex, other: Math.max(0, 24 - sleep - desk - ex) };
+}
+// exMetH / exH describe an average day's training: Σ(MET × hours) and Σ(hours)
+function dayPAL(deskH, sleepH, exMetH, exH) {
+  const d = dayHours(deskH, sleepH, exH);
+  return (d.sleep * MET_SLEEP + d.desk * MET_DESK + d.other * MET_AWAKE + (exMetH || 0)) / 24;
+}
+function dailyBurn(restKcal, deskH, sleepH, exMetH, exH) {
+  return restKcal > 0 ? restKcal * dayPAL(deskH, sleepH, exMetH, exH) : 0;
+}
+// an average day's training over the trailing window, in MET-hours and hours
+function trainingDay(logs, days) {
+  const n = Math.max(1, days);
+  let metH = 0, h = 0;
+  for (const l of logs) { const hh = l.secs / 3600; h += hh; metH += metOfLog(l) * hh; }
+  return { metH: metH / n, h: h / n };
+}
+
 /* ---- calories ----
    kcal/min = MET × 3.5 × kg / 200 (the standard ACSM conversion).
    Cadence bands for rope work are the Compendium's own splits, so entering
@@ -1376,6 +1504,56 @@ function repsOf(l) {
 const repsAreEstimated = l => !(l.reps > 0) && repsOf(l) > 0;
 const volumeKgOf = l => repsOf(l) * (l.load || 0);
 const volumeOfLogs = rows => rows.reduce((s, l) => s + volumeKgOf(l), 0);
+
+/* ---- per-exercise milestones ----
+   Every exercise piles something up, but not the same something: rope work
+   counts jumps, a walk counts kilometres, a dumbbell counts tonnes off the
+   floor, and a plank only ever counts minutes. Pick the metric from what the
+   exercise already records — a pace means distance, a load means volume, a
+   cadence means reps — and hang a roughly ×10 ladder off it, so the next rung
+   is always visible without being next week's problem.                       */
+const TONNE = 1000;
+const EX_METRICS = {
+  dist: { unit: "km", steps: [5, 10, 25, 50, 100, 250, 500, 1000], ic: "🥾",
+          of: (l, ex) => (l.secs / 3600) * (ex.kmh || 0),
+          fmt: v => (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10) + " km" },
+  vol:  { unit: "t", steps: [TONNE, 5 * TONNE, 10 * TONNE, 50 * TONNE, 100 * TONNE, 500 * TONNE, 1000 * TONNE], ic: "🏋️",
+          of: l => volumeKgOf(l),
+          fmt: v => (v >= TONNE ? (Math.round(v / 100) / 10) + " t" : Math.round(v) + " kg") },
+  reps: { unit: "reps", steps: [1e3, 1e4, 5e4, 1e5, 5e5, 1e6], ic: "🪢",
+          of: l => repsOf(l),
+          fmt: v => v >= 1e6 ? (Math.round(v / 1e5) / 10) + "M"
+                  : v >= 1e3 ? (Math.round(v / 100) / 10) + "k" : String(Math.round(v)) },
+  time: { unit: "min", steps: [10, 30, 60, 100, 300, 600, 1000, 3000, 6000], ic: "⏱️",
+          of: l => l.secs / 60,
+          fmt: v => v >= 60 ? fmtHM(v) : (Math.round(v * 10) / 10) + "min" }
+};
+// the first metric the exercise has the data for; time is the universal fallback
+function exMetricKey(ex) {
+  if (!ex) return "time";
+  if (ex.kmh > 0) return "dist";
+  if (ex.load > 0) return "vol";
+  if (ex.rate > 0) return "reps";
+  return "time";
+}
+const exMetricTotal = (ex, rows) => {
+  const m = EX_METRICS[exMetricKey(ex)];
+  return rows.reduce((t, l) => t + m.of(l, ex), 0);
+};
+/* One row per rung: everything below the total is earned, the first one above
+   it carries the progress bar, and nothing further is drawn — a ladder you can
+   see the top of is a ladder nobody climbs. */
+function exMilestones(ex, rows) {
+  const key = exMetricKey(ex), m = EX_METRICS[key];
+  const total = exMetricTotal(ex, rows);
+  const out = m.steps.map(goal => ({
+    key, goal, ic: m.ic, label: m.fmt(goal),
+    earned: total >= goal, pct: Math.min(100, total / goal * 100)
+  }));
+  const nextAt = out.findIndex(x => !x.earned);
+  return { key, unit: m.unit, total, totalTxt: m.fmt(total),
+           list: nextAt < 0 ? out : out.slice(0, nextAt + 1), next: nextAt < 0 ? null : out[nextAt] };
+}
 
 /* ---- waist ----
    Waist-to-height ratio beats BMI as a risk signal because BMI can't tell
@@ -1510,6 +1688,113 @@ function badgeState() {
   });
 }
 
+/* =====================================================================
+   INSIGHTS — observations drawn from your own log, not generic advice.
+   The two guideline anchors are the WHO's public physical-activity
+   recommendations (150 min moderate activity + 2 strength days a week).
+   ===================================================================== */
+function insights() {
+  const out = [];
+  const add = (ic, txt, kind) => out.push({ ic, txt, kind: kind || "info" });
+  const wk = weekKeyOf(new Date());
+  const wkLogs = logsBetween(wk, ymd(addDays(fromYmd(wk), 6)));
+  const mins = Math.round(weekSecs(wk) / 60);
+  const today = midnight();
+
+  // 1. WHO: 150 minutes of moderate-or-better activity a week
+  const modMins = Math.round(wkLogs.filter(l => metOfLog(l) >= 3).reduce((s, l) => s + l.secs, 0) / 60);
+  if (modMins >= 150) add("✅", `${modMins} min of moderate-or-harder activity this week — past the 150 the WHO suggests.`, "good");
+  else add("🎯", `${modMins} of 150 min moderate activity this week (WHO guideline) — ${150 - modMins} to go.`, "info");
+
+  // 2. WHO: strength work on 2+ days a week
+  const strengthDays = new Set(wkLogs.filter(l => l.cat === "dumbbell" || l.cat === "body").map(l => l.date));
+  if (strengthDays.size >= 2) add("💪", `Strength work on ${strengthDays.size} days this week — the guideline is 2.`, "good");
+  else add("💪", `Strength work on ${strengthDays.size} day${strengthDays.size === 1 ? "" : "s"} this week. Two is the usual recommendation.`, "warn");
+
+  // 3. neglected category
+  const lastCat = {};
+  DB.logs.forEach(l => { if (!lastCat[l.cat] || l.date > lastCat[l.cat]) lastCat[l.cat] = l.date; });
+  CATS.forEach(c => {
+    const last = lastCat[c.id];
+    const gap = last ? Math.round((today - fromYmd(last)) / 86400000) : null;
+    if (gap != null && gap >= 14) add("🕸️", `No ${c.name.toLowerCase()} work in ${gap} days — it's the one you skip most.`, "warn");
+  });
+
+  // 4. rest days piling up
+  let restRun = 0;
+  for (let i = 1; i <= 10; i++) { if (secsOn(ymd(addDays(today, -i))) > 0) break; restRun++; }
+  if (restRun >= 3) add("😴", `${restRun} rest days in a row. A short easy session is usually easier to start than a hard one.`, "warn");
+
+  // 5. no rest at all
+  let trainRun = 0;
+  for (let i = 0; i < 14; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
+  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built.`, "warn");
+
+  // 6. this week against your own recent norm
+  let prior = 0;
+  for (let i = 1; i <= 4; i++) prior += weekSecs(ymd(addDays(fromYmd(wk), -7 * i)));
+  const avg = Math.round(prior / 4 / 60);
+  if (avg > 10) {
+    const diff = Math.round((mins - avg) / avg * 100);
+    if (diff <= -30) add("📉", `${mins} min this week vs a ${avg} min average — down ${-diff}%.`, "warn");
+    else if (diff >= 30) add("📈", `${mins} min this week vs a ${avg} min average — up ${diff}%.`, "good");
+  }
+
+  // 7. weight trend and its rate
+  const kg = latestWeightKg();
+  if (kg > 0) {
+    const t7 = weightTrend(7), t30 = weightTrend(30);
+    const d = t7 - t30;
+    if (Math.abs(d) >= 0.3) {
+      const pctPerWeek = Math.abs(d) / kg * 100 / 3;      // ~3 weeks between the window centres
+      const dir = d < 0 ? "down" : "up";
+      if (pctPerWeek > 1) add("⚠️", `Weight is ${dir} ${fmtW(Math.abs(d))} on the trend — that is a fast rate. Around 0.5–1% of bodyweight a week is the usual sustainable range.`, "warn");
+      else add(d < 0 ? "📉" : "📈", `Weight trend is ${dir} ${fmtW(Math.abs(d))} comparing the last week to the last month.`, "info");
+    }
+  }
+  // 8. stale weigh-in
+  const wKeys = weightKeys();
+  if (wKeys.length) {
+    const gap = Math.round((today - fromYmd(wKeys[wKeys.length - 1])) / 86400000);
+    if (gap >= 10) add("⚖️", `Last weigh-in was ${gap} days ago. Weekly is enough — daily is noise.`, "info");
+  } else add("⚖️", "No weigh-ins yet. Without one, calories can't be estimated at all.", "info");
+
+  // 9. waist-to-height
+  const waist = latestWaistCm(), h = DB.profile.heightCm;
+  if (waist > 0 && h > 0) {
+    const r = whtr(waist, h), band = whtrBand(r);
+    if (r >= 0.5) add("📏", `Waist-to-height is ${r.toFixed(2)} (${band.label}). Under 0.5 — waist less than half your height — is the usual target.`, "warn");
+    else add("📏", `Waist-to-height is ${r.toFixed(2)} — ${band.label}.`, "good");
+  } else if (h > 0 && !waist) {
+    add("📏", "Try a waist measurement — it reads body-fat risk better than BMI, which can't tell muscle from fat.", "info");
+  }
+
+  // 10. load that hasn't moved
+  const byEx = {};
+  DB.logs.filter(l => l.load > 0).forEach(l => {
+    (byEx[l.exId] = byEx[l.exId] || []).push(l);
+  });
+  Object.keys(byEx).forEach(id => {
+    const rows = byEx[id].sort((a, b) => a.ts - b.ts);
+    if (rows.length < 8) return;
+    const first = rows[0], last = rows[rows.length - 1];
+    const weeks = (fromYmd(last.date) - fromYmd(first.date)) / 604800000;
+    if (weeks >= 6 && last.load <= first.load) {
+      add("🏋️", `${last.name} has been at ${fmtW(last.load)} for ${Math.round(weeks)} weeks. Adding a little load or a set is how it keeps working.`, "info");
+    }
+  });
+
+  // 11. when you actually train
+  const hours = {};
+  DB.logs.forEach(l => { const h2 = new Date(l.ts).getHours(); hours[h2] = (hours[h2] || 0) + 1; });
+  const top = Object.keys(hours).sort((a, b) => hours[b] - hours[a])[0];
+  if (top != null && DB.logs.length >= 20) {
+    const share = Math.round(hours[top] / DB.logs.length * 100);
+    if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
+  }
+  return out;
+}
+
 function niceMax(v) {
   if (v <= 0) return 10;
   const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1080, 1440, 2160, 2880];
@@ -1578,7 +1863,8 @@ function runTick() {
   const now = Date.now();
   if (RUN.resting) {
     RUN.restLeft = Math.max(0, RUN.restEnds - now) / 1000;
-    if (DB.settings.tick && RUN.restLeft > 0 && RUN.restLeft <= 3) {
+    // the countdown out of a rest belongs to the exercise you are about to start
+    if (cuesOf(exById(RUN.queue[RUN.idx + 1])).tick && RUN.restLeft > 0 && RUN.restLeft <= 3) {
       const s = Math.ceil(RUN.restLeft);
       if (s !== RUN.lastCue) { RUN.lastCue = s; cueTick(); }
     }
@@ -1595,21 +1881,22 @@ function runTick() {
   }
   paintRunner();
 }
-/* Optional bips along the way. Each fires once per exercise; `fired` is reset
-   whenever the clock is armed, so a Cancel-and-restart hears them all again. */
+/* Optional beeps along the way, taken from the exercise's own cue set. Each
+   fires once per run; `fired` is reset whenever the clock is armed, so a
+   Cancel-and-restart hears them all again. */
 function midCues(el, left) {
-  const s = DB.settings, f = RUN.fired;
-  if (s.tick && left <= 3) {
+  const c = cuesOf(exById(RUN.exId)), f = RUN.fired;
+  if (c.tick && left <= 3) {
     const n = Math.ceil(left);
     if (n !== RUN.lastCue) { RUN.lastCue = n; cueTick(); }
   }
   // half time is only meaningful once there are two halves worth hearing
-  if (s.cueHalf && RUN.dur >= 60 && !f.half && el >= RUN.dur / 2) { f.half = 1; cueHalf(); }
-  if (s.cueMin && RUN.dur > 60) {
+  if (c.half && RUN.dur >= 60 && !f.half && el >= RUN.dur / 2) { f.half = 1; cueHalf(); }
+  if (c.min && RUN.dur > 60) {
     const m = Math.floor(el / 60);
     if (m >= 1 && m !== f.min && left > 3) { f.min = m; cueMinute(); }
   }
-  if (s.cue30 && RUN.dur > 45 && !f.thirty && left <= 30) { f.thirty = 1; cue30(); }
+  if (c.s30 && RUN.dur > 45 && !f.thirty && left <= 30) { f.thirty = 1; cue30(); }
 }
 function startOvertime() {
   RUN.over = true;
@@ -1707,10 +1994,7 @@ function renderRunner() {
           : `<span class="dot" style="background:${catColor(ex.cat)}"></span>${esc(catName(ex.cat))}`}</div>
       </div>
     </div>
-    <div class="rcues${RUN.cuesOpen ? "" : " hide"}" id="rCues">${CUE_OPTS.map(([k, lab]) => `
-      <label><span>${lab}</span>
-        <span class="switch"><input type="checkbox" data-cue="${k}"${DB.settings[k] ? " checked" : ""}><span class="sl"></span></span>
-      </label>`).join("")}</div>
+    <div class="rcues${RUN.cuesOpen ? "" : " hide"}" id="rCues">${cueRowsHTML(cuesOf(ex))}</div>
     <div class="rmid">
       <div class="ring" id="rRing">
         <svg viewBox="0 0 120 120">
@@ -1721,17 +2005,17 @@ function renderRunner() {
         <div class="lbl"><div class="tm" id="rTime">0:00</div><div class="el" id="rSub"></div></div>
       </div>
     </div>
-    <div class="rctl">
-      <button id="rMinus">−${resting ? 15 : 30}s</button>
-      ${resting || RUN.armed ? "" : `<button id="rPause">${RUN.paused ? "▶" : "❚❚"}</button>`}
-      <button id="rPlus">+${resting ? 15 : 30}s</button>
-    </div>
+    ${resting ? `<div class="rctl">
+      <button id="rMinus">−15s</button>
+      <button id="rPlus">+15s</button>
+    </div>` : ""}
     <div class="rctl">${mainRow()}</div>`;
   function mainRow() {
     if (resting) return `<button class="go" id="rSkipRest">Skip rest ›</button>`;
     if (RUN.armed) return `<button class="go" id="rStart">Start ▶</button>`;
     const last = RUN.idx >= RUN.queue.length - 1;
-    return `<button id="rCancel">Cancel</button>
+    return `<button id="rPause">${RUN.paused ? "▶" : "❚❚"}</button>
+      <button id="rCancel">Cancel</button>
       <button class="go" id="rDone">${RUN.over ? (last ? "Stop ✓" : "Stop ›") : (last ? "Done ✓" : "Done ›")}</button>`;
   }
   $("rClose").onclick = endRun;
@@ -1739,13 +2023,10 @@ function renderRunner() {
     RUN.cuesOpen = !RUN.cuesOpen;
     $("rCues").classList.toggle("hide", !RUN.cuesOpen);
   };
-  $("rCues").querySelectorAll("[data-cue]").forEach(c => c.onchange = () => {
-    DB.settings[c.dataset.cue] = c.checked; save(true);
-    if (c.checked) cuePreview(c.dataset.cue);
-  });
-  $("rMinus").onclick = () => bumpRun(resting ? -15 : -30);
-  $("rPlus").onclick = () => bumpRun(resting ? 15 : 30);
+  bindCueRows($("rCues"), RUN.exId);
   if (resting) {
+    $("rMinus").onclick = () => bumpRun(-15);
+    $("rPlus").onclick = () => bumpRun(15);
     $("rSkipRest").onclick = () => { RUN.idx++; beginCurrent(); };
   } else if (RUN.armed) {
     $("rStart").onclick = startArmed;
@@ -1833,9 +2114,9 @@ function renderAll() {
 function paceNote(id, actualMin, expectedMin, catchUpTxt) {
   const el = $(id); if (!el) return;
   if (expectedMin <= 0) { el.className = "pacenote"; el.textContent = ""; return; }
-  const diff = (actualMin - expectedMin) / 60;
-  if (diff >= 0.25) { el.className = "pacenote ahead"; el.textContent = `${Math.round(diff * 10) / 10}h ahead of pace 🟢`; }
-  else if (diff <= -0.25) { el.className = "pacenote behind"; el.textContent = `${Math.round(-diff * 10) / 10}h behind pace${catchUpTxt ? " — " + catchUpTxt : ""}`; }
+  const diff = actualMin - expectedMin;
+  if (diff >= 15) { el.className = "pacenote ahead"; el.textContent = `${fmtHM(diff)} ahead of pace 🟢`; }
+  else if (diff <= -15) { el.className = "pacenote behind"; el.textContent = `${fmtHM(-diff)} behind pace${catchUpTxt ? " — " + catchUpTxt : ""}`; }
   else { el.className = "pacenote on"; el.textContent = "Right on pace 🟡"; }
 }
 function catRow(name, color, secs, maxSecs, totalSecs, extra) {
@@ -1876,14 +2157,12 @@ function renderToday() {
 
   $("todayList").innerHTML = mine.length
     ? `<div class="loggrid">${mine.slice().sort((a, b) => b.ts - a.ts).map(logTile).join("")}</div>`
-      + `<div class="hint">Tap a tile to review or correct it. <b>MET</b> is how many times your
-         resting metabolism the exercise costs — 1 is sitting still, 4 is brisk, 12 is hard rope work
-         — and it is what turns minutes into calories.</div>`
     : "";
   bindLogLines($("todayList"));
 
   renderStreaks();
   renderWeekGoal();
+  renderInsights("tipsToday", 0);
   // the weekly review is worth reading while last week is still fresh; after
   // Wednesday it just crowds Today, and it stays permanently on History
   const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
@@ -2104,7 +2383,7 @@ function renderStreaks() {
 function renderWeekGoal() {
   const wk = weekKeyOf(new Date());
   const goal = weekGoalMin(wk), mins = weekSecs(wk) / 60;
-  $("wkVal").textContent = `${Math.round(mins)} / ${goal} min ✎`;
+  $("wkVal").textContent = `${fmtHM(mins)} / ${fmtHM(goal)} ✎`;
   $("wkFill").style.width = (goal > 0 ? Math.min(100, mins / goal * 100) : 0) + "%";
   const elapsed = Math.min(7, Math.round((midnight() - fromYmd(wk)) / 86400000) + 1);
   $("wkPace").style.left = (elapsed / 7 * 100) + "%";
@@ -2302,9 +2581,14 @@ function paintBody() {
   const v = bmi(kg, cm), band = bmiBand(v);
   const rest = bmr(kg, cm, age, DB.profile.sex);
   const range = healthyKgRange(cm);
-  // burn from actual logged sessions over the last 7 days, not a guessed multiplier
-  const wkKcal = kcalOfLogs(logsBetween(ymd(addDays(midnight(), -6)), todayStr()));
-  const daily = rest ? rest * 1.2 + wkKcal / 7 : 0;
+  // the day is built from real hours — desk, sleep, and the sessions actually logged
+  const wkLogs = logsBetween(ymd(addDays(midnight(), -6)), todayStr());
+  const wkKcal = kcalOfLogs(wkLogs);
+  const td = trainingDay(wkLogs, 7);
+  const desk = DB.profile.deskHours, sleep = DB.profile.sleepHours;
+  const pal = dayPAL(desk, sleep, td.metH, td.h);
+  const daily = dailyBurn(rest, desk, sleep, td.metH, td.h);
+  const hrs = dayHours(desk, sleep, td.h);
 
   $("bodyBody").innerHTML = `
     <div class="card">
@@ -2337,10 +2621,25 @@ function paintBody() {
       <div class="kv"><span>Height</span><b>${fmtHeight(cm)}</b></div>
       <div class="kv"><span>Resting burn (BMR)</span><b>${rest ? Math.round(rest) + " kcal/day" : "—"}</b></div>
       <div class="kv"><span>Estimated daily burn</span><b>${daily ? Math.round(daily) + " kcal/day" : "—"}</b></div>
+      <div class="kv"><span>Activity level (PAL)</span><b>${rest ? pal.toFixed(2) + " ×" : "—"}</b></div>
       <div class="kv"><span>Burned this week</span><b>${Math.round(wkKcal)} kcal</b></div>
-      <div class="hint">BMR is Mifflin-St Jeor. Daily burn is BMR × 1.2 for everyday
-        movement plus your <em>actual</em> logged sessions averaged over the last 7 days —
-        not a guessed activity multiplier. All of it is a rough estimate, not medical advice.</div>
+      <div class="daybar" title="How an average day is spent">
+        <i style="flex:${hrs.sleep};background:#3b4252" data-lab="sleep"></i>
+        <i style="flex:${hrs.desk};background:var(--accent)" data-lab="desk"></i>
+        <i style="flex:${hrs.other};background:var(--accent2)" data-lab="up"></i>
+        <i style="flex:${Math.max(hrs.ex, 0.15)};background:var(--good)" data-lab="train"></i>
+      </div>
+      <div class="daykey">
+        <span><i style="background:#3b4252"></i>${Math.round(hrs.sleep)}h asleep</span>
+        <span><i style="background:var(--accent)"></i>${Math.round(hrs.desk)}h desk</span>
+        <span><i style="background:var(--accent2)"></i>${Math.round(hrs.other)}h up</span>
+        <span><i style="background:var(--good)"></i>${Math.round(td.h * 60)}min training</span>
+      </div>
+      <div class="hint">BMR is Mifflin-St Jeor. The daily burn adds up an average day in
+        MET-hours — sleep at 0.95, desk work at 1.5, the rest of your waking day at 1.8,
+        plus the sessions you <em>actually</em> logged over the last 7 days — rather than
+        guessing an activity multiplier. Set your desk and sleep hours in Settings.
+        A rough estimate, not medical advice.</div>
     </div>
 
     <div class="card">
@@ -2486,6 +2785,15 @@ function renderBadges(elId, compact) {
              <div class="bp">${Math.floor(x.val)} / ${x.goal}</div>`}
       </div>`).join("")}</div>`;
 }
+function renderInsights(elId, limit) {
+  const el = $(elId); if (!el) return;
+  const all = insights();
+  const list = limit ? all.slice(0, limit) : all;
+  el.innerHTML = list.length
+    ? list.map(i => `<div class="tip ${i.kind}"><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
+    : `<div class="empty">Log a few sessions and suggestions will show up here.</div>`;
+}
+
 /* ---------- CALENDAR ---------- */
 function renderCal() {
   const { from, to } = monthRange(calY, calM);
@@ -2494,7 +2802,9 @@ function renderCal() {
   const now = new Date();
   const isCur = calY === now.getFullYear() && calM === now.getMonth();
   const isPast = calY < now.getFullYear() || (calY === now.getFullYear() && calM < now.getMonth());
-  const elapsed = isCur ? now.getDate() : (isPast ? dim : 0);
+  // only the part of the month you were actually here for
+  const span = Math.max(1, goalDays(from, to));
+  const elapsed = goalDaysElapsed(from, to);
 
   $("calMonthLab").textContent = MONTHS[calM] + " " + calY;
   $("nextMonth").disabled = calY > now.getFullYear() || (calY === now.getFullYear() && calM >= now.getMonth());
@@ -2505,12 +2815,12 @@ function renderCal() {
   $("calAvg").textContent = Math.round(secs / 60 / Math.max(1, elapsed));
 
   const goal = monthGoalMin(calY, calM);
-  $("calGoalVal").textContent = `${fmtH(secs)} / ${Math.round(goal / 6) / 10} h`;
+  $("calGoalVal").textContent = `${fmtHM(secs / 60)} / ${fmtHM(goal)}`;
   $("calFill").style.width = (goal > 0 ? Math.min(100, secs / 60 / goal * 100) : 0) + "%";
-  $("calPace").style.left = (elapsed / dim * 100) + "%";
+  $("calPace").style.left = (elapsed / span * 100) + "%";
   if (goal > 0 && secs / 60 >= goal) { const el = $("calNote"); el.className = "pacenote ahead"; el.textContent = "Month goal reached 🏆"; }
-  else if (isPast) { const el = $("calNote"); el.className = "pacenote behind"; el.textContent = `Fell short — ${fmtH(secs)} of ${Math.round(goal / 6) / 10} h`; }
-  else paceNote("calNote", secs / 60, goal * (elapsed / dim), "");
+  else if (isPast) { const el = $("calNote"); el.className = "pacenote behind"; el.textContent = `Fell short — ${fmtHM(secs / 60)} of ${fmtHM(goal)}`; }
+  else paceNote("calNote", secs / 60, goal * (elapsed / span), "");
 
   // grid
   const g = $("calGrid"); g.innerHTML = "";
@@ -2573,9 +2883,8 @@ function renderHistory() {
   const { from, to } = yearRange(histYear);
   const ySecs = rangeSecs(from, to);
   const nowY = new Date().getFullYear();
-  const elapsed = histYear === nowY
-    ? Math.round((midnight() - new Date(histYear, 0, 1)) / 86400000) + 1
-    : (histYear < nowY ? daysInYear(histYear) : 0);
+  const ySpan = Math.max(1, goalDays(from, to));       // the part of the year you were here for
+  const elapsed = goalDaysElapsed(from, to);
   const goal = yearGoalMin(histYear);
   const reached = goal > 0 && ySecs / 60 >= goal;
   $("yrLab").textContent = histYear + (reached ? " 🏆" : "");
@@ -2594,12 +2903,12 @@ function renderHistory() {
     const d = DB.weights[wk[wk.length - 1]] - DB.weights[wk[0]];
     $("yrWeight").innerHTML = `${d > 0 ? "+" : ""}${(Math.round(toDisplayW(d) * 10) / 10).toFixed(1)}<small>${wUnit()}</small>`;
   } else $("yrWeight").textContent = "—";
-  $("yrGoalVal").textContent = `${fmtH(ySecs)} / ${Math.round(goal / 60)} h`;
+  $("yrGoalVal").textContent = `${fmtHM(ySecs / 60)} / ${fmtHM(goal)}`;
   $("yrFill").style.width = (goal > 0 ? Math.min(100, ySecs / 60 / goal * 100) : 0) + "%";
-  const yFrac = elapsed / daysInYear(histYear);
+  const yFrac = elapsed / ySpan;
   $("yrPace").style.left = (yFrac * 100) + "%";
   if (reached) { const el = $("yrNote"); el.className = "pacenote ahead"; el.textContent = "Yearly goal reached 🏆"; }
-  else if (histYear < nowY) { const el = $("yrNote"); el.className = "pacenote behind"; el.textContent = `Fell short — ${fmtH(ySecs)} of ${Math.round(goal / 60)} h`; }
+  else if (histYear < nowY) { const el = $("yrNote"); el.className = "pacenote behind"; el.textContent = `Fell short — ${fmtHM(ySecs / 60)} of ${fmtHM(goal)}`; }
   else paceNote("yrNote", ySecs / 60, goal * yFrac, "");
 
   // monthly bars, with last year as a faint ghost
@@ -2734,15 +3043,12 @@ function renderExList() {
       <h2><span style="display:flex;align-items:center;gap:8px">
         <span class="dot" style="background:${g.cat.color}"></span>${esc(g.cat.name)}</span>
         <span style="color:var(--muted)">${g.items.length}</span></h2>
-      ${g.items.map(e => `
-        <div class="exrow" data-openex="${e.id}">
-          <div class="arttile" style="color:${g.cat.color}">${art(e.art)}</div>
-          <div style="flex:1;min-width:0">
-            <div class="t">${e.fav ? "★ " : ""}${esc(e.name)}</div>
-            <div class="s">${durLabel(e.dur)}${e.note ? " · " + esc(e.note) : ""}</div>
-          </div>
-          <div class="r">›</div>
-        </div>`).join("")}
+      <div class="exgrid">${g.items.map(e => `
+        <div class="extile" data-openex="${e.id}" style="--catc:${g.cat.color}">
+          <div class="a">${art(e.art)}</div>
+          <div class="n">${e.fav ? "★ " : ""}${esc(e.name)}</div>
+          <div class="d">${durLabel(e.dur)}</div>
+        </div>`).join("")}</div>
     </div>`).join("")
     : `<div class="card"><div class="empty">No exercises match.</div></div>`;
   bindLogLines($("exList"));
@@ -2801,6 +3107,7 @@ function paintExercise() {
           <input type="number" id="evRest" min="0" max="600" step="5" value="${e.setRest == null ? 60 : e.setRest}"></div>
       </div>
       <div class="hint" id="evPlan" style="text-align:center"></div>
+      <div id="evCues" style="margin-top:4px">${cueRowsHTML(cuesOf(e))}</div>
       <button class="btn" id="evStart" style="margin-top:8px">Start</button>
       <button class="btn sec" id="evSaveDur" style="margin-top:8px">Save duration, sets and rest as default</button>
     </div>
@@ -2826,6 +3133,7 @@ function paintExercise() {
           + (heaviest > withLoad[0].load ? `<div class="kv"><span>Heaviest</span><b>${fmtW(heaviest)}</b></div>` : "");
       })()}
       ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
+      ${e.kmh > 0 ? `<div class="kv"><span>Pace</span><b>${e.kmh} km/h</b></div>` : ""}
     </div>
 
     <div class="card">
@@ -2838,6 +3146,27 @@ function paintExercise() {
             <div class="r" style="color:var(--txt);font-weight:700">${mmss(l.secs)}</div>
             <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button></div>`).join("")
         : `<div class="empty">No sessions yet.</div>`}</div>
+    </div>
+
+    <div class="card">
+      <h2>Milestones</h2>
+      ${(() => {
+        const ms = exMilestones(e, mine);
+        // rope work counts jumps; everything else with a cadence counts reps
+        const nameOf = { dist: "distance covered", vol: "total lifted", time: "time held",
+                         reps: e.art === "jumprope" ? "jumps" : "reps done" };
+        return `<div class="hint" style="margin-top:0">${ms.totalTxt} — ${nameOf[ms.key]}${
+          ms.key === "time" && exMetricKey(e) === "time" && !(e.rate > 0) && !(e.kmh > 0)
+            ? ". Give this one a cadence, load or pace in ✎ to count reps, tonnes or kilometres instead." : "."}</div>
+        <div class="badgegrid">${ms.list.map(x => `
+          <div class="badge ${x.earned ? "on" : ""}">
+            <div class="bic">${x.ic}</div>
+            <div class="bn">${x.label}</div>
+            ${x.earned ? `<div class="bp done">earned</div>`
+              : `<div class="bbar"><i style="width:${x.pct}%"></i></div>
+                 <div class="bp">${Math.round(x.pct)}%</div>`}
+          </div>`).join("")}</div>`;
+      })()}
     </div>
 
     <button class="btn sec" id="evLogManual">Log without the timer</button>`;
@@ -2874,6 +3203,7 @@ function paintExercise() {
     e.setRest = Math.max(0, +$("evRest").value || 0);
     save(true); renderAll(); toast("Saved as this exercise's default");
   };
+  bindCueRows($("evCues"), e.id);
   $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
   $("evLogManual").onclick = () => manualLog(e.id);
   bindLogLines($("evLogs"));
@@ -2973,13 +3303,18 @@ function editExercise(ex) {
       <div class="field" style="flex:1"><label for="exLoad">Load (${wUnit()}, optional)</label>
         <input type="number" id="exLoad" min="0" step="0.5" value="${e.load ? Math.round(toDisplayW(e.load) * 10) / 10 : ""}"></div>
     </div>
-    <div class="field"><label for="exRate">Cadence — jumps or reps per minute (optional)</label>
-      <input type="number" id="exRate" min="0" max="400" step="5" value="${e.rate || ""}"></div>
+    <div class="btnrow">
+      <div class="field" style="flex:1"><label for="exRate">Cadence — reps / min</label>
+        <input type="number" id="exRate" min="0" max="400" step="5" value="${e.rate || ""}"></div>
+      <div class="field" style="flex:1"><label for="exKmh">Pace — km/h</label>
+        <input type="number" id="exKmh" min="0" max="40" step="0.1" value="${e.kmh || ""}"></div>
+    </div>
     <div class="hint" style="margin-top:-8px">MET is the published metabolic cost of the
       activity and drives the calorie estimate — 3.5 is light resistance work, 8 is
       vigorous, 11.8 is a moderate rope pace. For rope exercises a cadence picks the
       MET band for you (&lt;100/min 8.8, 100–120 11.8, 120+ 12.3). Load is tracked for
-      progression; it doesn't inflate the estimate.</div>
+      progression; it doesn't inflate the estimate. A pace turns minutes into kilometres
+      for the milestones below the exercise.</div>
     <div class="field toggle"><span>Show in Today's routine</span>
       <label class="switch"><input type="checkbox" id="exFav" ${e.fav ? "checked" : ""}><span class="sl"></span></label></div>
     <div class="field"><label>Illustration</label>
@@ -3010,7 +3345,8 @@ function editExercise(ex) {
         note: $("exNote").value.trim(),
         met: Math.max(1, +$("exMet").value || CAT_MET[$("exCat").value] || 4),
         load: Math.max(0, fromDisplayW(+$("exLoad").value || 0)),
-        rate: Math.max(0, +$("exRate").value || 0) };
+        rate: Math.max(0, +$("exRate").value || 0),
+        kmh: Math.max(0, +$("exKmh").value || 0) };
       if (isNew) DB.exercises.push(Object.assign({ id: uid("ex"), ord: DB.exercises.length, arch: false }, patch));
       else Object.assign(ex, patch);
       save(true); closeSheet(); renderAll();
@@ -3145,9 +3481,12 @@ const SHEET_SCHEMA = {
       DB.profile.heightCm ? Math.round(whtr(DB.waists[k], DB.profile.heightCm) * 1000) / 1000 : ""])
   },
   Exercises: {
-    cols: ["id", "name", "category", "seconds", "art", "favourite", "met", "load_kg", "rate_per_min", "note", "archived"],
+    cols: ["id", "name", "category", "seconds", "art", "favourite", "met", "load_kg", "rate_per_min",
+           "kmh", "cues", "note", "archived"],
     rows: () => DB.exercises.map(e => [e.id, e.name, catName(e.cat), e.dur, e.art,
-      e.fav ? "yes" : "", e.met, e.load || "", e.rate || "", e.note || "", e.arch ? "yes" : ""])
+      e.fav ? "yes" : "", e.met, e.load || "", e.rate || "", e.kmh || "",
+      CUE_OPTS.filter(([k]) => cuesOf(e)[k]).map(([k]) => k).join(" ") || "",
+      e.note || "", e.arch ? "yes" : ""])
   },
   WeekGoals: {
     cols: ["week_starting", "goal_minutes"],
@@ -3163,6 +3502,8 @@ const SHEET_SCHEMA = {
     rows: () => [
       ["birthday", DB.profile.birth], ["height_cm", DB.profile.heightCm],
       ["sex", DB.profile.sex], ["units", DB.settings.units],
+      ["first_day", startDate()], ["desk_hours", DB.profile.deskHours],
+      ["sleep_hours", DB.profile.sleepHours],
       ["weekly_goal_minutes", DB.settings.weeklyGoalMin],
       ["app_version", APP_VERSION], ["schema", SCHEMA_VERSION]
     ]
@@ -3245,18 +3586,12 @@ function renderSettings() {
   const s = DB.settings, pr = DB.profile;
   $("setBeep").checked = s.beep; $("setVib").checked = s.vib;
   $("setWake").checked = s.wake;
-  // same CUE_OPTS list the runner's bell panel renders from
-  $("cueRows").innerHTML = CUE_OPTS.map(([k, lab]) => `
-    <div class="field toggle"><span>${lab}</span>
-      <label class="switch"><input type="checkbox" data-cue="${k}"${s[k] ? " checked" : ""}><span class="sl"></span></label>
-    </div>`).join("");
-  $("cueRows").querySelectorAll("[data-cue]").forEach(c => c.onchange = () => {
-    DB.settings[c.dataset.cue] = c.checked; save();
-    if (c.checked) cuePreview(c.dataset.cue);
-  });
   $("setWeekly").value = s.weeklyGoalMin;
   $("setUnits").value = s.units;
   $("setBirth").value = pr.birth || "";
+  $("setStart").value = startDate();
+  $("setDesk").value = pr.deskHours;
+  $("setSleep").value = pr.sleepHours;
   $("setSex").value = pr.sex || "";
 
   // height is one field in metric and two in imperial
@@ -3424,7 +3759,7 @@ function boot() {
 
   $("wkVal").onclick = () => {
     const wk = weekKeyOf(new Date());
-    askNumber("Weekly goal", "Minutes for the week of " + fromYmd(wk).toLocaleDateString(undefined, { month: "short", day: "numeric" }), weekGoalMin(wk), v => {
+    askNumber("Weekly goal", "Minutes for the week of " + fromYmd(wk).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ` — ${fmtHM(weekGoalMin(wk))} today`, weekGoalMin(wk), v => {
       setWeekGoal(wk, v); save(true); renderAll(); toast("Goal set for this week");
     });
   };
@@ -3455,6 +3790,13 @@ function boot() {
   $("setUnits").onchange = e => { DB.settings.units = e.target.value; save(true); renderAll(); if (bodyOpen) paintBody(); };
   $("setBirth").onchange = e => { DB.profile.birth = e.target.value; save(true); renderSettings(); renderToday(); };
   $("setSex").onchange = e => { DB.profile.sex = e.target.value; save(true); renderSettings(); };
+  $("setStart").onchange = e => { DB.profile.startDate = e.target.value; save(true); renderAll(); };
+  $("setDesk").onchange = e => {
+    DB.profile.deskHours = Math.min(16, Math.max(0, +e.target.value || 0)); save(true); renderSettings();
+  };
+  $("setSleep").onchange = e => {
+    DB.profile.sleepHours = Math.min(14, Math.max(0, +e.target.value || 0)); save(true); renderSettings();
+  };
   $("setSyncUrl").onchange = e => { DB.settings.syncUrl = e.target.value.trim(); save(true); renderSettings(); };
   $("setSyncToken").onchange = e => { DB.settings.syncToken = e.target.value.trim(); save(true); renderSettings(); };
   $("setSyncAuto").onchange = e => { DB.settings.syncAuto = e.target.checked; save(true); };
