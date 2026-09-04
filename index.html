@@ -289,8 +289,16 @@
     min-width:36px;height:36px;border-radius:10px;font-size:15px;cursor:pointer;padding:0 10px;}
   .fpage .pbody{flex:1;overflow-y:auto;padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
   .fpage .pbody .wrapin{max-width:560px;margin:0 auto;}
-  .exhero{display:flex;align-items:center;justify-content:center;padding:6px 0 2px;}
-  .exhero svg{width:min(38vh,56vw);height:min(38vh,56vw);}
+  /* same 52px thumbnail the runner uses, so an exercise looks the same whether
+     you are about to start it or already running it */
+  .fpage .phead .pthumb{flex:0 0 auto;width:38px;height:38px;border-radius:11px;background:var(--card);
+    border:1px solid var(--line);display:flex;align-items:center;justify-content:center;}
+  .fpage .phead .pthumb svg{width:28px;height:28px;color:var(--accent2);}
+  /* Start never scrolls off: it is pinned below the scroller, not inside it */
+  .fpage .pfoot{flex:0 0 auto;padding:10px 16px calc(10px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--line);background:var(--card);}
+  .fpage .pfoot .wrapin{max-width:560px;margin:0 auto;}
+  .fpage .pfoot .btn{margin:0;}
   .durbig{text-align:center;font-size:46px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-1px;}
   .durrow{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:12px;}
   .durrow button{width:52px;height:44px;border-radius:12px;border:1px solid var(--line);
@@ -702,15 +710,17 @@
 <div class="fpage" id="exView">
   <div class="phead">
     <button id="evBack" aria-label="Back">‹</button>
+    <span class="pthumb" id="evThumb"></span>
     <span class="pt" id="evTitle"></span>
     <button id="evEdit">Edit</button>
   </div>
   <div class="pbody"><div class="wrapin" id="evBody"></div></div>
+  <div class="pfoot"><div class="wrapin"><button class="btn" id="evStart">Start</button></div></div>
 </div>
 
 <script>
 "use strict";
-const APP_VERSION = "9";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "10";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 5;
 const LSKEY = "anvil.db";
 
@@ -926,6 +936,15 @@ const CUE_OPTS = [
 const DEF_PROFILE = { birth: "", heightCm: 0, sex: "", deskHours: 8, sleepHours: 8, startDate: "" };
 const DEF_CUES = { tick: true, half: false, min: false, s30: false };
 const cuesOf = ex => Object.assign({}, DEF_CUES, (ex && ex.cues) || {});
+const cueSummary = ex => {
+  const on = CUE_OPTS.filter(([k]) => cuesOf(ex)[k]).map(([, l]) => l.replace(/^Beep (at )?/, ""));
+  return on.length ? on.join(", ") : "none";
+};
+/* Overtime is you walking back to the phone, not training. Trim the reaching-for-it
+   seconds off the log, but never below the target you actually set. */
+const OVERTIME_TRIM = 3;
+const trimOvertime = (raw, dur, trim) =>
+  dur > 0 && raw > dur ? Math.max(dur, raw - (trim == null ? OVERTIME_TRIM : trim)) : raw;
 /*</pure>*/
 
 /* ===================== storage ===================== */
@@ -1157,6 +1176,12 @@ function bindCueRows(host, exId) {
     const ex = exById(exId); if (!ex) return;
     ex.cues = Object.assign(cuesOf(ex), { [c.dataset.cue]: c.checked });
     save(true);
+    // the exercise page summarises the cues above; keep the two in step whichever
+    // panel you toggled from, including the runner's bell mid-session
+    if (exViewId === exId && $("evCueSum")) $("evCueSum").textContent = cueSummary(ex);
+    const twin = host.id === "evCues" ? $("rCues") : $("evCues");
+    const t = twin && twin.querySelector(`[data-cue="${c.dataset.cue}"]`);
+    if (t) t.checked = c.checked;
     if (c.checked) cuePreview(c.dataset.cue);
   });
 }
@@ -1878,6 +1903,10 @@ function runTick() {
     const left = RUN.dur - RUN.elapsed;
     if (left > 0) midCues(RUN.elapsed, left);
     else if (!RUN.over) startOvertime();
+  } else {
+    // an open-ended clock has no half, no 30-left and no countdown, but the
+    // minute bip is exactly what it is for — keep it running
+    midCues(RUN.elapsed, Infinity);
   }
   paintRunner();
 }
@@ -1892,7 +1921,7 @@ function midCues(el, left) {
   }
   // half time is only meaningful once there are two halves worth hearing
   if (c.half && RUN.dur >= 60 && !f.half && el >= RUN.dur / 2) { f.half = 1; cueHalf(); }
-  if (c.min && RUN.dur > 60) {
+  if (c.min && (!RUN.dur || RUN.dur > 60)) {
     const m = Math.floor(el / 60);
     if (m >= 1 && m !== f.min && left > 3) { f.min = m; cueMinute(); }
   }
@@ -1939,7 +1968,7 @@ function bumpRun(sec) {
 }
 const elapsedNow = () => RUN.paused || RUN.armed ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000;
 function finishCurrent() {
-  const secs = Math.round(elapsedNow());
+  const secs = trimOvertime(Math.round(elapsedNow()), RUN.dur);
   stopAlarm();
   if (secs >= 3) logEntry(RUN.exId, secs);                // ignore accidental taps
   buzz(60);
@@ -3061,6 +3090,7 @@ function openExercise(id) {
   exViewId = id;
   evDur = e.dur || 0;
   $("evTitle").textContent = e.name;
+  $("evThumb").innerHTML = art(e.art);
   paintExercise();
   $("exView").classList.add("show");
   document.body.style.overflow = "hidden";
@@ -3072,16 +3102,17 @@ function closeExercise() {
 }
 function paintExercise() {
   const e = exById(exViewId); if (!e) { closeExercise(); return; }
+  $("evThumb").innerHTML = art(e.art);                   // Edit can reassign the artwork
   const mine = DB.logs.filter(l => l.exId === e.id).sort((a, b) => b.ts - a.ts);
   const total = sumSecs(mine);
   const mr = monthRange(calYNow(), calMNow());
   const thisMonth = mine.filter(l => l.date >= mr.from && l.date <= mr.to);
   const best = mine.reduce((m, l) => Math.max(m, l.secs), 0);
 
+  const kgNow = latestWeightKg();
   $("evBody").innerHTML = `
-    <!-- the hero uses --accent2 like the runner does; the category hues are tuned
-         as chart marks and go muddy at this size -->
-    <div class="exhero" style="color:var(--accent2)">${art(e.art)}</div>
+    <!-- the artwork now lives in the header at runner size, so the page opens on
+         the numbers you came for rather than on a picture you already recognised -->
     <div style="text-align:center;margin-bottom:6px">
       <span class="chip" style="cursor:default"><span class="dot" style="display:inline-block;background:${catColor(e.cat)};margin-right:6px;vertical-align:middle"></span>${esc(catName(e.cat))}</span>
       <span class="chip" id="evFav" style="${e.fav ? "background:var(--warn);border-color:var(--warn);color:#06101c;font-weight:700" : ""}">${e.fav ? "★ favourite" : "☆ favourite"}</span>
@@ -3089,6 +3120,19 @@ function paintExercise() {
     ${e.note ? `<div class="hint" style="text-align:center">${esc(e.note)}</div>` : ""}
 
     <div class="card" style="margin-top:16px">
+      <h2>Details</h2>
+      <div class="kv"><span>Intensity (MET)</span><b>${exerciseMet(e).toFixed(1)}</b></div>
+      ${kgNow ? `<div class="kv"><span>Burn at ${fmtW(kgNow)}</span><b>${kcalFrom(60, exerciseMet(e), kgNow).toFixed(1)} kcal/min</b></div>` : ""}
+      <div class="kv"><span>Default length</span><b>${durLabel(e.dur)}${e.sets > 1 ? ` × ${e.sets} sets` : ""}</b></div>
+      ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
+      ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
+      ${e.kmh > 0 ? `<div class="kv"><span>Pace</span><b>${e.kmh} km/h</b></div>` : ""}
+      <div class="kv"><span>Cues</span><b id="evCueSum">${cueSummary(e)}</b></div>
+      <div class="hint" style="margin-bottom:0">MET, load, cadence and pace are set in <b>Edit</b>.
+        Everything below is saved to this exercise the moment you press Start.</div>
+    </div>
+
+    <div class="card">
       <h2>Timer</h2>
       <div class="durbig" id="evDurLab"></div>
       <div class="durrow">
@@ -3108,8 +3152,6 @@ function paintExercise() {
       </div>
       <div class="hint" id="evPlan" style="text-align:center"></div>
       <div id="evCues" style="margin-top:4px">${cueRowsHTML(cuesOf(e))}</div>
-      <button class="btn" id="evStart" style="margin-top:8px">Start</button>
-      <button class="btn sec" id="evSaveDur" style="margin-top:8px">Save duration, sets and rest as default</button>
     </div>
 
     <div class="card">
@@ -3123,17 +3165,13 @@ function paintExercise() {
         ? `Last done ${relDay(mine[0].ts)} · longest set ${mmss(best)}`
         : "Not logged yet."}${canEstimateKcal() && mine.length
         ? ` · ${Math.round(kcalOfLogs(mine))} kcal all time` : ""}</div>
-      <div class="kv" style="margin-top:8px"><span>Intensity (MET)</span><b>${exerciseMet(e).toFixed(1)}</b></div>
-      ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
       ${(() => {
         const withLoad = mine.filter(l => l.load > 0);
         if (!withLoad.length) return "";
         const heaviest = Math.max(...withLoad.map(l => l.load));
-        return `<div class="kv"><span>Last lifted</span><b>${fmtW(withLoad[0].load)}</b></div>`
+        return `<div class="kv" style="margin-top:8px"><span>Last lifted</span><b>${fmtW(withLoad[0].load)}</b></div>`
           + (heaviest > withLoad[0].load ? `<div class="kv"><span>Heaviest</span><b>${fmtW(heaviest)}</b></div>` : "");
       })()}
-      ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
-      ${e.kmh > 0 ? `<div class="kv"><span>Pace</span><b>${e.kmh} km/h</b></div>` : ""}
     </div>
 
     <div class="card">
@@ -3178,9 +3216,12 @@ function paintExercise() {
       ? `Log your weight to see a calorie estimate`
       : (evDur ? `≈ <b>${Math.round(kcalFrom(evDur, exerciseMet(e), kg))} kcal</b> at MET ${exerciseMet(e).toFixed(1)}`
                : `≈ <b>${(kcalFrom(60, exerciseMet(e), kg)).toFixed(1)} kcal/min</b> at MET ${exerciseMet(e).toFixed(1)}`);
+    // the pinned button spells out what it is about to do, since the dial it
+    // reflects is usually scrolled off by the time you reach for it
+    const n = Math.max(1, +($("evSets") || {}).value || 1);
+    $("evStart").textContent = `Start ${evDur ? mmss(evDur) : "open"}${n > 1 ? ` × ${n}` : ""} ▶`;
   };
   lab();
-  const origLab = lab;
   $("evMinus").onclick = () => { evDur = Math.max(0, evDur - (evDur > 300 ? 60 : 30)); lab(); plan(); };
   $("evPlus").onclick = () => { evDur = Math.min(7200, evDur + (evDur >= 300 ? 60 : 30)); lab(); plan(); };
   $("evBody").querySelectorAll("[data-setdur]").forEach(c =>
@@ -3195,13 +3236,17 @@ function paintExercise() {
     if (reps) $("evPlan").textContent += ` · roughly ${reps} reps at ${e.rate}/min`;
   };
   plan();
-  $("evSets").oninput = plan; $("evRest").oninput = plan;
-  $("evStart").onclick = () => startExercise(e.id, evDur, Math.max(1, +$("evSets").value || 1));
-  $("evSaveDur").onclick = () => {
-    e.dur = evDur;
-    e.sets = Math.max(1, +$("evSets").value || 1);
-    e.setRest = Math.max(0, +$("evRest").value || 0);
-    save(true); renderAll(); toast("Saved as this exercise's default");
+  $("evSets").oninput = () => { plan(); lab(); };
+  $("evRest").oninput = plan;
+  // Starting IS the save. Whatever you dialled in becomes this exercise's default,
+  // so there is nothing to remember to press afterwards — cues already write on
+  // toggle, and now length, sets and rest commit the same way.
+  $("evStart").onclick = () => {
+    const n = Math.max(1, +$("evSets").value || 1);
+    e.dur = evDur; e.sets = n; e.setRest = Math.max(0, +$("evRest").value || 0);
+    save(true);
+    renderToday(); renderExList();
+    startExercise(e.id, evDur, n);
   };
   bindCueRows($("evCues"), e.id);
   $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
