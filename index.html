@@ -753,7 +753,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "15";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "16";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
@@ -3909,7 +3909,7 @@ const syncConfigured = () => !!(DB.settings.syncUrl && DB.settings.syncToken);
    Code.gs together, by one, whenever the backend changes.
    A deployment older than the field itself answers with no `backend` at all,
    which reads as 0 — so "never redeployed" is loud rather than silent. */
-const BACKEND_MIN = 1;
+const BACKEND_MIN = 2;
 let backendSeen = null;                  // last version a reply reported, null until one does
 // the sheet is a deployment, not a download: it only updates when you redeploy it
 const backendStale = () => backendSeen !== null && backendSeen < BACKEND_MIN;
