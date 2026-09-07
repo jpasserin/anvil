@@ -437,11 +437,6 @@
       <div id="bodyCard"></div>
     </div>
 
-    <div class="card" id="reviewCard">
-      <h2>Last week <span class="act" id="goReview">history ›</span></h2>
-      <div id="reviewToday"></div>
-    </div>
-
     <div class="card" id="chainCard">
       <h2>Circuits <span class="act" id="newChain">+ new</span></h2>
       <div id="chainList"></div>
@@ -476,6 +471,11 @@
     <div class="card">
       <div class="calgrid" id="calGrid"></div>
       <div class="callegend" id="calLegend"></div>
+    </div>
+    <!-- the weekly review belongs next to the month it sits inside, not on Today -->
+    <div class="card" id="reviewCard">
+      <h2>Last week <span class="act" id="goReview">history ›</span></h2>
+      <div id="reviewToday"></div>
     </div>
     <div class="card">
       <h2>This month by category</h2>
@@ -738,7 +738,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "11";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "12";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 5;
 const LSKEY = "anvil.db";
 
@@ -2266,12 +2266,6 @@ function renderToday() {
   renderStreaks();
   renderWeekGoal();
   renderInsights("tipsToday", 0);
-  // the weekly review is worth reading while last week is still fresh; after
-  // Wednesday it just crowds Today, and it stays permanently on History
-  const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
-  const early = dowMon(new Date()) <= 2;
-  $("reviewCard").classList.toggle("hide", !early || !logsBetween(lastMon, ymd(addDays(fromYmd(lastMon), 6))).length);
-  if (early) $("reviewToday").innerHTML = weekReviewHTML(lastMon);
   renderBodyCard();
   renderRoutineList();
   renderChainList();
@@ -2953,6 +2947,15 @@ function renderCal() {
   $("calLegend").innerHTML = `<span>rest</span><i style="background:var(--bg2)"></i>`
     + [1, 2, 3, 4].map(n => `<i style="background:var(--h${n})"></i>`).join("")
     + `<span>2× daily share</span>`;
+
+  // Last week is always the week just gone, not "the last week of calM" — it is a
+  // fixed review of what you just did, so paging the calendar back does not rewrite
+  // it. No day-of-week gate any more either: the old one existed to stop it
+  // crowding Today, and on a page you open to look back there is nothing to crowd.
+  const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
+  const hasLast = !!logsBetween(lastMon, ymd(addDays(fromYmd(lastMon), 6))).length;
+  $("reviewCard").classList.toggle("hide", !hasLast);
+  if (hasLast) $("reviewToday").innerHTML = weekReviewHTML(lastMon);
 
   $("calCats").innerHTML = catBreakdown(logsBetween(from, to));
 }
