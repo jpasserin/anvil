@@ -374,6 +374,12 @@
   .rwarn{display:block;width:100%;margin-top:12px;padding:12px 10px;border-radius:12px;
     background:#3a2f14;border:1px solid var(--warn);color:var(--warn);
     font-size:13.5px;font-weight:700;text-align:center;cursor:pointer;}
+  /* .flat is the same warning without the tap affordance, for the ones we can't fix */
+  .rwarn.flat{cursor:default;}
+  .rdist{margin-top:12px;text-align:center;font-size:14px;color:var(--muted);min-height:20px;}
+  .rdist b{font-size:20px;font-weight:800;color:var(--txt);}
+  .rdist .s{margin-left:7px;color:var(--accent2);font-weight:700;}
+  .rdist .w{font-size:13px;}
   .rprog{display:flex;gap:3px;margin-top:12px;}
   .rprog i{flex:1 1 0;height:4px;border-radius:2px;background:var(--line);}
   .rprog i.done{background:var(--good)} .rprog i.now{background:var(--accent)}
@@ -746,8 +752,8 @@
 
 <script>
 "use strict";
-const APP_VERSION = "13";          // keep equal to CACHE in sw.js; bump every change
-const SCHEMA_VERSION = 5;
+const APP_VERSION = "14";          // keep equal to CACHE in sw.js; bump every change
+const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
 /* =====================================================================
@@ -993,7 +999,8 @@ function seedExercises() {
   return DEFAULT_EXERCISES.map(([name, cat, dur, a, fav, met, kmh, rate], i) =>
     ({ id: uid("ex"), name, cat, dur, art: a, fav: !!fav, ord: i, arch: false, note: "",
        met, load: 0, rate: rate || 0, kmh: kmh || 0, sets: 1, setRest: 60,
-       lead: DEF_LEAD, cues: Object.assign({}, DEF_CUES) }));
+       // GPS defaults on for the ones whose whole point is covering ground
+       lead: DEF_LEAD, gps: (kmh || 0) > 0, cues: Object.assign({}, DEF_CUES) }));
 }
 function freshDB() {
   const ex = seedExercises();
@@ -1045,6 +1052,10 @@ function migrate(d) {
     if (!(e.sets > 0)) e.sets = 1;                       // v4: repeated sets with a rest between
     if (!(e.setRest >= 0)) e.setRest = 60;
     if (e.lead == null) e.lead = DEF_LEAD;               // v5: count-in before the clock starts
+    // v6: measure distance instead of estimating it from a nominal pace. On by
+    // default only where a pace was already shipped, so nothing else starts
+    // asking for a location permission it has no use for.
+    if (e.gps == null) e.gps = e.kmh > 0;
     // v5: timer cues moved from one global setting to one set per exercise.
     // Carry the old global across so nobody's countdown silently switches off.
     if (!e.cues) e.cues = Object.assign({}, DEF_CUES,
@@ -1116,6 +1127,60 @@ function fmtHM(mins) {
   return r ? `${h}h${pad2(r)}` : `${h}h`;
 }
 const exById = id => DB.exercises.find(e => e.id === id);
+
+/* ---- measured distance from GPS ----
+   Summing raw point-to-point hops over-reports badly. A phone standing still still
+   reports a fix that wanders by tens of metres, so a ten-minute plank in the garden
+   would "walk" half a kilometre. Three cheap filters, in this order:
+
+     · drop any fix whose own claimed accuracy is worse than GPS_MAX_ACC — a 100m
+       fix tells you nothing about a 3m step
+     · ignore a hop shorter than the accuracy of the two fixes involved: that is
+       inside the noise, so it is jitter, not walking. The anchor deliberately does
+       NOT advance here, so genuine slow movement still accumulates once the
+       displacement clears the noise floor — otherwise a slow walk would be
+       rejected one small hop at a time and never count at all
+     · ignore a hop implying a speed no human sustains. That is a cold-start jump
+       between cell and satellite fixes. Here the anchor DOES advance, because the
+       new fix is probably the good one and re-anchoring resyncs.
+
+   Only the running total is ever kept. The coordinates are looked at once, to
+   measure the step, and thrown away — nothing about where you were is stored or
+   sent anywhere.                                                              */
+const EARTH_KM = 6371.0088;
+const GPS_MAX_ACC = 30;             // metres of claimed accuracy
+const GPS_MAX_KMH = 45;             // faster than a sprint = a bad fix, not a record
+const GPS_MIN_JITTER = 4;           // metres — floor under the accuracy-based gate
+const rad = d => d * Math.PI / 180;
+function haversineKm(a, b) {
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const s = Math.sin(dLat / 2) ** 2
+    + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+// a fix is { lat, lon, acc (metres), t (ms) }; state is { km, last, kept, dropped }
+const gpsInit = () => ({ km: 0, last: null, kept: 0, dropped: 0 });
+function gpsAdd(st, fix) {
+  const s = { km: st.km || 0, last: st.last || null, kept: st.kept || 0, dropped: st.dropped || 0 };
+  if (!fix || !isFinite(fix.lat) || !isFinite(fix.lon) || !(fix.acc <= GPS_MAX_ACC)) {
+    s.dropped++; return s;
+  }
+  if (!s.last) { s.last = fix; s.kept++; return s; }       // the first fix is the anchor
+  const km = haversineKm(s.last, fix);
+  const floor = Math.max(GPS_MIN_JITTER, fix.acc, s.last.acc) / 1000;
+  if (km < floor) { s.dropped++; return s; }               // inside the noise: keep the anchor
+  const dt = (fix.t - s.last.t) / 1000;
+  if (dt > 0 && km / (dt / 3600) > GPS_MAX_KMH) { s.dropped++; s.last = fix; return s; }
+  s.km += km; s.last = fix; s.kept++;
+  return s;
+}
+// min/km is how walking and running pace is read everywhere; 0 km has no pace
+const paceSecPerKm = (km, secs) => km > 0 ? secs / km : 0;
+function fmtPace(km, secs) {
+  const p = paceSecPerKm(km, secs);
+  if (!(p > 0) || !isFinite(p)) return "—";
+  return `${Math.floor(p / 60)}'${pad2(Math.round(p % 60))}"`;
+}
 /*</pure>*/
 function toast(msg, kind) {
   const t = $("toast");
@@ -1211,6 +1276,57 @@ function buzz(pattern) {
   if (!DB.settings.vib) return;
   try { navigator.vibrate && navigator.vibrate(pattern); } catch (e) {}
 }
+
+/* ===================== location =====================
+   One `watchPosition` for the whole session, opened only if something in the queue
+   asks for it. The accumulator resets per set, so five laps logged as five sets
+   each carry their own distance rather than a running total, and the watch stays
+   open across the rest between them — reacquiring a satellite fix every set would
+   lose the first hundred metres each time.
+
+   Nothing is stored but the total. See gpsAdd for why the raw hops can't be
+   trusted, and note that the coordinates never leave this function.           */
+const GEO_OPTS = { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 };
+function geoWanted() { return RUN.queue.some(id => { const e = exById(id); return !!(e && e.gps); }); }
+function geoStart() {
+  if (!geoWanted()) { RUN.geo = null; return; }
+  RUN.geo = Object.assign(gpsInit(), { state: "wait", watch: null });
+  if (!navigator.geolocation) { RUN.geo.state = "unavailable"; return; }
+  try {
+    RUN.geo.watch = navigator.geolocation.watchPosition(pos => {
+      if (!RUN.active || !RUN.geo) return;
+      const c = pos.coords;
+      const was = RUN.geo.state;
+      // a fix only counts while the clock is actually running: the count-in, a
+      // pause and the rest between sets are all time you are not covering ground
+      const live = !RUN.leading && !RUN.paused && !RUN.armed && !RUN.resting;
+      if (live) {
+        const next = gpsAdd(RUN.geo, { lat: c.latitude, lon: c.longitude, acc: c.accuracy, t: pos.timestamp });
+        Object.assign(RUN.geo, next);
+      }
+      RUN.geo.state = "ok";
+      RUN.geo.acc = c.accuracy;
+      if (was !== "ok") renderRunner(); else paintRunner();
+    }, err => {
+      if (!RUN.geo) return;
+      // 1 = PERMISSION_DENIED; the rest are "couldn't get a fix", which may still fix itself
+      RUN.geo.state = err && err.code === 1 ? "denied" : "unavailable";
+      renderRunner();
+    }, GEO_OPTS);
+  } catch (e) { RUN.geo.state = "unavailable"; }
+}
+function geoStop() {
+  if (RUN.geo && RUN.geo.watch != null) {
+    try { navigator.geolocation.clearWatch(RUN.geo.watch); } catch (e) {}
+  }
+  RUN.geo = null;
+}
+// each set measures its own distance; the watch and the permission stay put
+function geoResetLeg() {
+  if (!RUN.geo) return;
+  Object.assign(RUN.geo, gpsInit());
+}
+const geoKm = () => (RUN.geo && RUN.geo.state === "ok" ? RUN.geo.km : 0);
 /* End-of-exercise chimes. Each is a list of [delay ms, frequency, length ms,
    waveform, volume] so they can be previewed from Settings without duplicating
    any playback code. */
@@ -1477,6 +1593,19 @@ const wUnit = () => isImperial() ? "lb" : "kg";
 const toDisplayW = kg => isImperial() ? kgToLb(kg) : kg;
 const fromDisplayW = v => isImperial() ? lbToKg(v) : v;
 const fmtW = kg => (Math.round(toDisplayW(kg) * 10) / 10).toFixed(1) + " " + wUnit();
+const MI_PER_KM = 0.62137119;
+const dUnit = () => isImperial() ? "mi" : "km";
+const toDisplayD = km => isImperial() ? km * MI_PER_KM : km;
+const fromDisplayD = v => isImperial() ? v / MI_PER_KM : v;
+// under a kilometre, metres read better than "0.4 km" — and a walk often is
+const fmtDist = km => {
+  if (!(km > 0)) return "—";
+  if (!isImperial() && km < 1) return Math.round(km * 1000) + " m";
+  const v = toDisplayD(km);
+  return (v >= 100 ? Math.round(v) : Math.round(v * 100) / 100) + " " + dUnit();
+};
+// pace is per displayed unit, so an imperial pace is min/mile, not min/km
+const fmtPaceU = (km, secs) => fmtPace(toDisplayD(km), secs) + "/" + dUnit();
 function fmtHeight(cm) {
   if (!cm) return "—";
   if (!isImperial()) return Math.round(cm) + " cm";
@@ -1624,7 +1753,8 @@ const volumeOfLogs = rows => rows.reduce((s, l) => s + volumeKgOf(l), 0);
 const TONNE = 1000;
 const EX_METRICS = {
   dist: { unit: "km", steps: [5, 10, 25, 50, 100, 250, 500, 1000], ic: "🥾",
-          of: (l, ex) => (l.secs / 3600) * (ex.kmh || 0),
+          // a measured distance always beats one inferred from a nominal pace
+          of: (l, ex) => l.km > 0 ? l.km : (l.secs / 3600) * (ex.kmh || 0),
           fmt: v => (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10) + " km" },
   vol:  { unit: "t", steps: [TONNE, 5 * TONNE, 10 * TONNE, 50 * TONNE, 100 * TONNE, 500 * TONNE, 1000 * TONNE], ic: "🏋️",
           of: l => volumeKgOf(l),
@@ -1640,7 +1770,7 @@ const EX_METRICS = {
 // the first metric the exercise has the data for; time is the universal fallback
 function exMetricKey(ex) {
   if (!ex) return "time";
-  if (ex.kmh > 0) return "dist";
+  if (ex.kmh > 0 || ex.gps) return "dist";       // tracking distance means counting it
   if (ex.load > 0) return "vol";
   if (ex.rate > 0) return "reps";
   return "time";
@@ -1925,7 +2055,8 @@ const RUN = {
   startedAt: 0, elapsed: 0, paused: false, armed: false, over: false,
   resting: false, restLeft: 0, restLen: 0, restEnds: 0,
   routineName: "", tick: null, alarm: null, lastCue: -1, fired: {}, cuesOpen: false,
-  audio: "ok"                        // "ok" | "off" | "blocked" — set by soundCheck
+  audio: "ok",                       // "ok" | "off" | "blocked" — set by soundCheck
+  geo: null                          // null when nothing in the queue tracks distance
 };
 // N sets of one exercise is just a queue of N copies with a rest between —
 // the runner already knows how to walk a queue, so sets cost no new machinery.
@@ -1950,6 +2081,7 @@ function startQueue(ids, rest, name, durOverride) {
   RUN.cuesOpen = false;
   acquireWake();
   soundCheck();                       // before the first cue, not after it
+  geoStart();                         // asks for the permission once, up front
   document.body.style.overflow = "hidden";
   beginCurrent();
   RUN.tick = setInterval(runTick, 200);
@@ -1986,6 +2118,7 @@ function armCurrent(hold) {
   RUN.startedAt = Date.now(); RUN.elapsed = 0;
   RUN.paused = false; RUN.resting = false; RUN.over = false; RUN.leading = false;
   RUN.armed = !!hold; RUN.lastCue = -1; RUN.fired = {};
+  geoResetLeg();                      // a fresh clock measures a fresh distance
 }
 function runTick() {
   if (!RUN.active) return;
@@ -2084,7 +2217,7 @@ const elapsedNow = () =>
 function finishCurrent() {
   const secs = trimOvertime(Math.round(elapsedNow()), RUN.dur);
   stopAlarm();
-  if (secs >= 3) logEntry(RUN.exId, secs);                // ignore accidental taps
+  if (secs >= 3) logEntry(RUN.exId, secs, null, geoKm()); // ignore accidental taps
   buzz(60);
   if (RUN.idx >= RUN.queue.length - 1) { stopRun(); toast(`Logged · ${mmss(secs)}`); return; }
   if (RUN.restLen > 0) {
@@ -2096,7 +2229,7 @@ function finishCurrent() {
 function stopRun() {
   clearInterval(RUN.tick); RUN.tick = null;
   stopAlarm();
-  RUN.active = false; releaseWake();
+  RUN.active = false; releaseWake(); geoStop();
   document.body.style.overflow = "";
   const r = $("runner"); if (r) r.remove();
   renderAll();
@@ -2105,8 +2238,26 @@ function stopRun() {
 function endRun() {
   const secs = Math.round(elapsedNow());
   stopAlarm();
-  if (!RUN.resting && !RUN.armed && secs >= 20 && confirm(`Log the ${mmss(secs)} you already did?`)) logEntry(RUN.exId, secs);
+  if (!RUN.resting && !RUN.armed && secs >= 20 && confirm(`Log the ${mmss(secs)} you already did?`)) logEntry(RUN.exId, secs, null, geoKm());
   stopRun();
+}
+/* A denied permission is not re-requestable from script — the browser remembers,
+   and only the user can undo it in site settings. So this one explains rather than
+   offering a fix button that would do nothing when tapped. */
+function geoWarnHTML() {
+  if (!RUN.geo || RUN.geo.state === "ok" || RUN.geo.state === "wait") return "";
+  return `<div class="rwarn flat">📍 ${RUN.geo.state === "denied"
+    ? "Location is blocked — allow it in site settings to measure distance"
+    : "No location fix — distance won't be measured"}</div>`;
+}
+function paintDist() {
+  const el = $("rDist");
+  if (!el || !RUN.geo) return;
+  if (RUN.geo.state === "wait") { el.innerHTML = `<span class="w">📍 finding you…</span>`; return; }
+  if (RUN.geo.state !== "ok") { el.innerHTML = ""; return; }
+  const km = RUN.geo.km, secs = elapsedNow();
+  el.innerHTML = `<b>${fmtDist(km)}</b>`
+    + (km > 0 ? ` <span class="s">${fmtPaceU(km, secs)}</span>` : ` <span class="w">tracking…</span>`);
 }
 function renderRunner() {
   let r = $("runner");
@@ -2139,6 +2290,8 @@ function renderRunner() {
     </div>
     ${RUN.audio === "ok" ? "" : `<button class="rwarn" id="rFixAudio">🔇 ${
       RUN.audio === "off" ? "Sound is off" : "Sound is blocked"} — tap to turn it on</button>`}
+    ${geoWarnHTML()}
+    ${RUN.geo ? `<div class="rdist" id="rDist"></div>` : ""}
     <div class="rcues${RUN.cuesOpen ? "" : " hide"}" id="rCues">${cueRowsHTML(cuesOf(ex))}</div>
     <div class="rmid">
       <div class="ring" id="rRing">
@@ -2197,6 +2350,7 @@ function renderRunner() {
 function paintRunner() {
   const t = $("rTime"), p = $("rPrg"), sub = $("rSub"), ring = $("rRing");
   if (!t) return;
+  paintDist();
   const C = 2 * Math.PI * 52;
   if (RUN.leading) {
     // one big digit, not mm:ss — you are meant to read it from across the room
@@ -2237,14 +2391,17 @@ function paintRunner() {
 }
 
 /* ===================== logging ===================== */
-function logEntry(exId, secs, when) {
+function logEntry(exId, secs, when, km) {
   const ex = exById(exId);
   if (!ex) return;
   const d = when ? new Date(when) : new Date();
   DB.logs.push({
     id: uid("lg"), exId, name: ex.name, cat: ex.cat, art: ex.art,
     date: ymd(d), ts: d.getTime(), secs: Math.round(secs),
-    met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, reps: 0, note: ""
+    met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, reps: 0, note: "",
+    // only present when GPS actually measured something, so `l.km > 0` is a
+    // reliable "this distance is real, not derived from a nominal pace"
+    km: km > 0 ? Math.round(km * 1000) / 1000 : 0
   });
   save();
 }
@@ -2353,7 +2510,10 @@ function logRow(l) {
   const rate = l.rate > 0 ? l.rate : (ex && ex.rate > 0 ? ex.rate : 0);
   const load = l.load > 0 ? l.load : (ex && ex.load > 0 ? ex.load : 0);
   const bits = [new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })];
-  if (rate) bits.push(`<span class="x">${rate}/min</span>`);
+  // a measured distance outranks a cadence or a load: it is the thing that
+  // actually happened, and for a walk it is the only number worth reading
+  if (l.km > 0) bits.push(`<span class="x">${fmtDist(l.km)}</span>`);
+  else if (rate) bits.push(`<span class="x">${rate}/min</span>`);
   else if (load) bits.push(`<span class="x">${fmtW(load)}</span>`);
   // MET only when there is no burn figure: four bits overflow 384px, and kcal
   // already carries the intensity in the unit you actually care about
@@ -2393,6 +2553,8 @@ function editLog(id) {
     <div class="kv" style="margin-top:10px"><span>Category</span><b>${esc(catName(l.cat))}</b></div>
     <div class="kv"><span>Intensity</span><b>MET ${metOfLog(l).toFixed(1)}</b></div>
     ${l.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${l.rate}/min</b></div>` : ""}
+    ${l.km > 0 ? `<div class="kv"><span>Distance measured</span><b>${fmtDist(l.km)} · ${
+      fmtPaceU(l.km, l.secs)}</b></div>` : ""}
     ${canEstimateKcal() ? `<div class="kv"><span>Estimated burn</span><b>${Math.round(kcalOfLog(l))} kcal</b></div>` : ""}
     ${volumeKgOf(l) > 0 ? `<div class="kv"><span>Volume</span><b>${Math.round(volumeKgOf(l))} kg${
       repsAreEstimated(l) ? " (est.)" : ""}</b></div>` : ""}
@@ -2407,6 +2569,10 @@ function editLog(id) {
     <div class="field"><label for="elLoad">Load (${wUnit()}) — what you actually lifted this session</label>
       <input type="number" id="elLoad" min="0" step="0.5" inputmode="decimal"
         value="${l.load > 0 ? Math.round(toDisplayW(l.load) * 10) / 10 : ""}"></div>
+    ${l.km > 0 || (exById(l.exId) || {}).gps ? `<div class="field">
+      <label for="elKm">Distance (${dUnit()}) — GPS is not infallible; blank clears it</label>
+      <input type="number" id="elKm" min="0" step="0.01" inputmode="decimal"
+        value="${l.km > 0 ? Math.round(toDisplayD(l.km) * 100) / 100 : ""}"></div>` : ""}
     ${exById(l.exId) ? `<div class="field toggle">
       <span class="small">Also make this the default for ${esc((exById(l.exId) || {}).name || "")}</span>
       <label class="switch"><input type="checkbox" id="elDefault"><span class="sl"></span></label></div>` : ""}
@@ -2424,6 +2590,7 @@ function editLog(id) {
       l.secs = secs;
       l.load = Math.max(0, fromDisplayW(+$("elLoad").value || 0));
       l.reps = Math.max(0, +$("elReps").value || 0);
+      if ($("elKm")) l.km = Math.max(0, fromDisplayD(+$("elKm").value || 0));
       // moving the default forward is the usual reason you changed it — 8kg today,
       // 10kg from now on — but it stays opt-in so a one-off heavy set doesn't stick
       const ex = exById(l.exId);
@@ -3251,6 +3418,7 @@ function paintExercise() {
   const mr = monthRange(calYNow(), calMNow());
   const thisMonth = mine.filter(l => l.date >= mr.from && l.date <= mr.to);
   const best = mine.reduce((m, l) => Math.max(m, l.secs), 0);
+  const measured = mine.filter(l => l.km > 0);           // GPS sessions, not estimates
 
   const kgNow = latestWeightKg();
   $("evBody").innerHTML = `
@@ -3281,7 +3449,10 @@ function paintExercise() {
           <input type="number" id="evLead" min="0" max="60" step="1" value="${leadOf(e)}"></div>
       </div>
       <div class="hint" id="evPlan" style="text-align:center"></div>
-      <div id="evCues" style="margin-top:4px">${cueRowsHTML(cuesOf(e))}</div>
+      <label class="cuerow"><span>Track distance (GPS)</span>
+        <span class="switch"><input type="checkbox" id="evGps"${e.gps ? " checked" : ""}><span class="sl"></span></span>
+      </label>
+      <div id="evCues">${cueRowsHTML(cuesOf(e))}</div>
     </div>
 
     <div class="card">
@@ -3291,8 +3462,12 @@ function paintExercise() {
       <div class="kv"><span>Default length</span><b>${durLabel(e.dur)}${e.sets > 1 ? ` × ${e.sets} sets` : ""}</b></div>
       ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
       ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
-      ${e.kmh > 0 ? `<div class="kv"><span>Pace</span><b>${e.kmh} km/h</b></div>` : ""}
+      ${e.kmh > 0 ? `<div class="kv"><span>Pace</span><b>${e.kmh} km/h${e.gps ? " (estimate)" : ""}</b></div>` : ""}
+      ${measured.length ? `<div class="kv"><span>Distance measured</span><b>${
+        fmtDist(measured.reduce((s, l) => s + l.km, 0))} over ${measured.length} ${
+        measured.length === 1 ? "session" : "sessions"}</b></div>` : ""}
       <div class="kv"><span>Count-in</span><b id="evLeadSum">${leadOf(e) ? leadOf(e) + "s" : "none"}</b></div>
+      <div class="kv"><span>Distance</span><b id="evGpsSum">${e.gps ? "tracked by GPS" : "not tracked"}</b></div>
       <div class="kv"><span>Cues</span><b id="evCueSum">${cueSummary(e)}</b></div>
       <div class="hint" style="margin-bottom:0">MET, load, cadence and pace are set in <b>Edit</b>.
         Everything in the Timer card is saved to this exercise the moment you press Start.</div>
@@ -3390,6 +3565,14 @@ function paintExercise() {
     const n = leadOf({ lead: $("evLead").value });
     $("evLeadSum").textContent = n ? n + "s" : "none";
   };
+  // this one writes on toggle rather than waiting for Start, like the cues: it
+  // changes what the next session measures, and you may well be about to read
+  // the Details line to check it took
+  $("evGps").onchange = () => {
+    e.gps = $("evGps").checked;
+    save(true);
+    $("evGpsSum").textContent = e.gps ? "tracked by GPS" : "not tracked";
+  };
   // Starting IS the save. Whatever you dialled in becomes this exercise's default,
   // so there is nothing to remember to press afterwards — cues already write on
   // toggle, and now length, sets and rest commit the same way.
@@ -3397,6 +3580,7 @@ function paintExercise() {
     const n = Math.max(1, +$("evSets").value || 1);
     e.dur = evDur; e.sets = n; e.setRest = Math.max(0, +$("evRest").value || 0);
     e.lead = leadOf({ lead: $("evLead").value });
+    e.gps = $("evGps").checked;
     save(true);
     renderToday(); renderExList();
     startExercise(e.id, evDur, n);
@@ -3664,12 +3848,15 @@ function manualLog(exId) {
 const SHEET_SCHEMA = {
   Sessions: {
     cols: ["id", "date", "time", "exercise", "category", "seconds", "minutes", "met", "kcal",
-           "load_kg", "rate_per_min", "reps", "reps_estimated", "volume_kg", "note", "exId"],
+           "load_kg", "rate_per_min", "reps", "reps_estimated", "volume_kg",
+           "distance_km", "pace_s_per_km", "note", "exId"],
     rows: () => DB.logs.slice().sort((a, b) => a.ts - b.ts).map(l => [
       l.id, l.date, new Date(l.ts).toTimeString().slice(0, 5), l.name, catName(l.cat),
       l.secs, Math.round(l.secs / 60 * 100) / 100, l.met || "", Math.round(kcalOfLog(l)),
       l.load || "", l.rate || "", repsOf(l) || "", repsAreEstimated(l) ? "yes" : "",
-      Math.round(volumeKgOf(l)) || "", l.note || "", l.exId])
+      Math.round(volumeKgOf(l)) || "",
+      l.km || "", l.km > 0 ? Math.round(paceSecPerKm(l.km, l.secs)) : "",
+      l.note || "", l.exId])
   },
   Weight: {
     cols: ["date", "kg", "lb"],
@@ -3682,9 +3869,10 @@ const SHEET_SCHEMA = {
   },
   Exercises: {
     cols: ["id", "name", "category", "seconds", "art", "favourite", "met", "load_kg", "rate_per_min",
-           "kmh", "count_in_s", "cues", "note", "archived"],
+           "kmh", "count_in_s", "track_gps", "cues", "note", "archived"],
     rows: () => DB.exercises.map(e => [e.id, e.name, catName(e.cat), e.dur, e.art,
       e.fav ? "yes" : "", e.met, e.load || "", e.rate || "", e.kmh || "", leadOf(e),
+      e.gps ? "yes" : "",
       CUE_OPTS.filter(([k]) => cuesOf(e)[k]).map(([k]) => k).join(" ") || "",
       e.note || "", e.arch ? "yes" : ""])
   },

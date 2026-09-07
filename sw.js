@@ -1,7 +1,7 @@
 // Anvil service worker — network-first for the document, cache-first for the shell.
 // Bump CACHE on every change (keep it equal to APP_VERSION in index.html) so
 // clients pick up the new build on the next reload.
-const CACHE = "anvil-13";
+const CACHE = "anvil-14";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./icon.svg", "./icon-maskable.svg"
