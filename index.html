@@ -651,7 +651,7 @@
       <div class="field" style="margin-top:12px"><label for="setSyncUrl">Apps Script web-app URL</label>
         <input id="setSyncUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off"></div>
       <div class="field"><label for="setSyncToken">Shared token</label>
-        <input id="setSyncToken" placeholder="the SECRET you set in Code.gs" autocomplete="off"></div>
+        <input id="setSyncToken" placeholder="the SECRET from Code.local.gs" autocomplete="off"></div>
       <div class="field toggle"><span>Push automatically after changes</span>
         <label class="switch"><input type="checkbox" id="setSyncAuto"><span class="sl"></span></label></div>
       <div class="btnrow">
@@ -660,9 +660,10 @@
         <button class="btn" id="syncPush">Push</button>
       </div>
       <div class="hint">Not connected yet is fine — everything works offline. When you're ready,
-        copy <code>Code.gs</code> from the repo into a Google Apps Script bound to a new
-        spreadsheet, deploy it as a web app, and paste the URL here. The sheet layout is
-        generated from the app, so adding a field later needs no backend change.</div>
+        copy <code>Code.local.gs</code> from the private repo into a Google Apps Script bound to a
+        new spreadsheet, deploy it as a web app, and paste the URL here. The sheet layout is
+        generated from the app, so adding a field later needs no backend change — only a change
+        to the backend's own code does, and then <b>Test</b> will tell you.</div>
     </div>
 
     <div class="card">
@@ -752,7 +753,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "14";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "15";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
@@ -3904,6 +3905,14 @@ function syncPayload() {
 }
 /*</pure>*/
 const syncConfigured = () => !!(DB.settings.syncUrl && DB.settings.syncToken);
+/* The BACKEND_VERSION this app expects to be talking to. Bump it here and in
+   Code.gs together, by one, whenever the backend changes.
+   A deployment older than the field itself answers with no `backend` at all,
+   which reads as 0 — so "never redeployed" is loud rather than silent. */
+const BACKEND_MIN = 1;
+let backendSeen = null;                  // last version a reply reported, null until one does
+// the sheet is a deployment, not a download: it only updates when you redeploy it
+const backendStale = () => backendSeen !== null && backendSeen < BACKEND_MIN;
 // Apps Script web apps don't do CORS preflight, so the body goes as text/plain —
 // that keeps the request "simple" and avoids the OPTIONS round trip entirely.
 async function syncCall(action, extra) {
@@ -3917,6 +3926,8 @@ async function syncCall(action, extra) {
   let out;
   try { out = JSON.parse(txt); }
   catch (e) { throw new Error("backend returned junk — is the URL the /exec one?"); }
+  // recorded before the ok check: an error reply still tells you what's deployed
+  backendSeen = typeof out.backend === "number" ? out.backend : 0;
   if (!out.ok) throw new Error(out.error || "backend refused");
   return out;
 }
@@ -3924,7 +3935,16 @@ let syncBusy = false;
 function setSyncState(msg, kind) {
   const el = $("syncState"); if (!el) return;
   const colour = kind === "err" ? "var(--bad)" : kind === "ok" ? "var(--good)" : "var(--muted)";
-  el.innerHTML = `<div class="hint" style="margin:0;color:${colour}">${esc(msg)}</div>`;
+  /* The stale-backend line rides along under every message rather than only
+     appearing on Test, because a push that "worked" against an old deployment is
+     the failure you'd otherwise never look for. Amber: the sync did happen, it
+     just may have dropped a column this app now sends. */
+  el.innerHTML = `<div class="hint" style="margin:0;color:${colour}">${esc(msg)}</div>`
+    + (backendStale()
+      ? `<div class="hint" style="margin:6px 0 0;color:var(--warn);font-weight:700">
+           ⚠ Backend v${backendSeen} is deployed, this app wants v${BACKEND_MIN}
+           — paste Code.local.gs into Apps Script and deploy a new version</div>`
+      : "");
 }
 async function syncPush(quiet) {
   if (syncBusy || !syncConfigured()) return;
@@ -4192,7 +4212,10 @@ function boot() {
   $("syncPull").onclick = () => syncPull();
   $("syncTest").onclick = async () => {
     setSyncState("Testing…");
-    try { const o = await syncCall("ping"); setSyncState(`Connected to "${o.sheet || "the sheet"}"`, "ok"); }
+    try {
+      const o = await syncCall("ping");
+      setSyncState(`Connected to "${o.sheet || "the sheet"}" · backend v${backendSeen}`, "ok");
+    }
     catch (e) { setSyncState("Failed — " + e.message, "err"); }
   };
   $("setWeekly").onchange = e => {
