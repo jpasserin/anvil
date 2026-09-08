@@ -380,6 +380,30 @@
   .rdist b{font-size:20px;font-weight:800;color:var(--txt);}
   .rdist .s{margin-left:7px;color:var(--accent2);font-weight:700;}
   .rdist .w{font-size:13px;}
+  /* ---- the log-this-set confirm ---- */
+  .pbody2{flex:1 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;
+    align-items:stretch;justify-content:center;padding:10px 0;}
+  /* smaller than the running clock: this is a number to read and correct, not
+     one to catch sight of from across the room */
+  .confbig{font-size:clamp(56px,18vw,84px);font-weight:800;font-variant-numeric:tabular-nums;
+    letter-spacing:-2px;line-height:1;text-align:center;}
+  .confsub{margin-top:9px;text-align:center;font-size:13.5px;color:var(--muted);}
+  /* four narrow steps, so ±1s stays a thumb-sized target without the 90px height
+     the go/no-go row needs — you are standing still and aiming by now */
+  .rctl.conf{margin-top:22px;}
+  .rctl.conf button{min-height:58px;font-size:16px;}
+  /* the whole point of the screen popping up is that you SEE this */
+  .mileban{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:13px 14px;
+    border-radius:16px;background:linear-gradient(135deg,#3a2f14,#221c0e);
+    border:1px solid var(--warn);color:var(--warn);}
+  .mileban .mi{flex:0 0 auto;font-size:32px;line-height:1;}
+  .mileban .mh{font-size:15.5px;font-weight:800;}
+  .mileban .ms{font-size:12.5px;opacity:.85;margin-top:2px;}
+  /* the one line that answers "is this going up?" — coloured, because the
+     direction is the message and it should not need reading to register */
+  .trend{margin-top:9px;font-size:13.5px;font-weight:700;}
+  .trend.up{color:var(--good)} .trend.down{color:var(--warn)}
+  .trend.flat,.trend.new{color:var(--muted)}
   .rprog{display:flex;gap:3px;margin-top:12px;}
   .rprog i{flex:1 1 0;height:4px;border-radius:2px;background:var(--line);}
   .rprog i.done{background:var(--good)} .rprog i.now{background:var(--accent)}
@@ -753,7 +777,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "16";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "17";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
@@ -1794,6 +1818,60 @@ function exMilestones(ex, rows) {
   return { key, unit: m.unit, total, totalTxt: m.fmt(total),
            list: nextAt < 0 ? out : out.slice(0, nextAt + 1), next: nextAt < 0 ? null : out[nextAt] };
 }
+/* What a log that hasn't been written yet would earn. Computed from the totals
+   either side rather than by diffing two rung lists, so it stays right when one
+   session clears several rungs at once — it reports the highest one cleared,
+   because that is the one worth celebrating. Returns null for the usual case.
+   Pure, and cheap enough to re-run on every ±1s tap in the confirm screen. */
+function milestoneGained(ex, rows, provisional) {
+  if (!ex || !provisional) return null;
+  const key = exMetricKey(ex), m = EX_METRICS[key];
+  const before = exMetricTotal(ex, rows);
+  const after = before + m.of(provisional, ex);
+  const crossed = m.steps.filter(s => before < s && after >= s);
+  if (!crossed.length) return null;
+  const goal = crossed[crossed.length - 1];
+  /* reps is the one metric whose fmt is a bare number, because everywhere else it
+     is read next to a heading that says what is being counted. The banner is not:
+     "Milestone — 1k" doesn't say 1k of what, so the noun is added back here. */
+  const noun = key === "reps" ? " " + (ex.art === "jumprope" ? "jumps" : "reps") : "";
+  return { key, goal, ic: m.ic, label: m.fmt(goal) + noun, also: crossed.length - 1,
+           total: after, totalTxt: m.fmt(after) + noun };
+}
+
+/* ---- progression ----
+   Weekly buckets of whatever the exercise counts. Weekly rather than
+   per-session because one session is noise — "Recent" already lists those —
+   and the question a chart has to answer is whether the trend is up.
+   Empty weeks are KEPT: a fortnight off is the most important thing a
+   progression chart can tell you, and dropping the gap would draw a
+   cheerfully rising line straight through it. */
+function exWeekly(ex, rows, weeks) {
+  const m = EX_METRICS[exMetricKey(ex)];
+  const mon = fromYmd(weekKeyOf(new Date()));
+  const out = [];
+  for (let i = weeks - 1; i >= 0; i--) {
+    const wk = ymd(addDays(mon, -7 * i));
+    const end = ymd(addDays(fromYmd(wk), 6));
+    const inWk = rows.filter(l => l.date >= wk && l.date <= end);
+    out.push({ wk, val: inWk.reduce((s, l) => s + m.of(l, ex), 0), n: inWk.length });
+  }
+  return out;
+}
+/* The last N weeks against the N before them. A percentage off two single weeks
+   would swing wildly on one missed session, so both sides are blocks — and the
+   current week is deliberately included even though it's incomplete, because
+   this is a nudge to train, not a report to file. */
+function exTrend(ex, rows, weeks) {
+  const w = exWeekly(ex, rows, weeks * 2);
+  const recent = w.slice(weeks).reduce((s, x) => s + x.val, 0);
+  const prior = w.slice(0, weeks).reduce((s, x) => s + x.val, 0);
+  if (recent <= 0 && prior <= 0) return null;
+  if (prior <= 0) return { dir: "new", pct: 0, recent, prior };
+  const pct = Math.round((recent - prior) / prior * 100);
+  // ±5% on a hand-timed log is noise, not a trend, and calling it one is a lie
+  return { dir: pct > 5 ? "up" : pct < -5 ? "down" : "flat", pct, recent, prior };
+}
 
 /* ---- waist ----
    Waist-to-height ratio beats BMI as a risk signal because BMI can't tell
@@ -2057,7 +2135,8 @@ const RUN = {
   resting: false, restLeft: 0, restLen: 0, restEnds: 0,
   routineName: "", tick: null, alarm: null, lastCue: -1, fired: {}, cuesOpen: false,
   audio: "ok",                       // "ok" | "off" | "blocked" — set by soundCheck
-  geo: null                          // null when nothing in the queue tracks distance
+  geo: null,                         // null when nothing in the queue tracks distance
+  pending: null                      // { secs, km, trimmed } while the confirm screen is up
 };
 // N sets of one exercise is just a queue of N copies with a rest between —
 // the runner already knows how to walk a queue, so sets cost no new machinery.
@@ -2215,26 +2294,63 @@ function bumpRun(sec) {
 }
 const elapsedNow = () =>
   RUN.leading ? 0 : (RUN.paused || RUN.armed ? RUN.elapsed : (Date.now() - RUN.startedAt) / 1000);
+/* Done freezes the clock and asks. It does NOT log.
+   The number you are about to keep is captured at the tap, so the seconds spent
+   reading the confirm screen can't leak into it — the reason the screen exists is
+   that the seconds between finishing and reaching the phone were already leaking. */
 function finishCurrent() {
-  const secs = trimOvertime(Math.round(elapsedNow()), RUN.dur);
+  const raw = Math.round(elapsedNow());
+  const secs = trimOvertime(raw, RUN.dur);
   stopAlarm();
-  if (secs >= 3) logEntry(RUN.exId, secs, null, geoKm()); // ignore accidental taps
   buzz(60);
-  if (RUN.idx >= RUN.queue.length - 1) { stopRun(); toast(`Logged · ${mmss(secs)}`); return; }
+  if (!RUN.paused) { RUN.elapsed = elapsedNow(); RUN.paused = true; }
+  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), trimmed: raw - secs };
+  renderRunner();
+}
+// ±1s because a tap or two is the correction, and ±5s because "it took me five
+// seconds to reach the phone" is the specific complaint this screen answers
+function bumpPending(sec) {
+  if (!RUN.pending) return;
+  RUN.pending.secs = Math.max(0, RUN.pending.secs + sec);
+  renderRunner();
+}
+function cancelPending() {
+  if (!RUN.pending) return;
+  RUN.pending = null;
+  // resume where the clock was left, and pick the alarm back up if still over —
+  // startOvertime won't re-fire on its own once RUN.over is already true
+  if (RUN.paused) { RUN.startedAt = Date.now() - RUN.elapsed * 1000; RUN.paused = false; }
+  if (RUN.over && !RUN.alarm) RUN.alarm = setInterval(() => { if (!RUN.paused) cueDone(); }, 2600);
+  renderRunner();
+}
+function commitPending() {
+  if (!RUN.pending) return;
+  const { secs, km } = RUN.pending;
+  RUN.pending = null;
+  if (secs >= 3) logEntry(RUN.exId, secs, null, km);      // ignore accidental taps
+  const last = RUN.idx >= RUN.queue.length - 1;
+  // only the end of the whole session goes to Today — doing it mid-queue would
+  // walk out of a session you are three sets into
+  if (last) { stopRun(true); toast(`Logged · ${mmss(secs)}`); return; }
+  RUN.paused = false;
   if (RUN.restLen > 0) {
     RUN.resting = true; RUN.restEnds = Date.now() + RUN.restLen * 1000;
     RUN.restLeft = RUN.restLen; RUN.lastCue = -1; RUN.over = false; RUN.armed = false;
     cueRest(); renderRunner();
   } else { RUN.idx++; beginCurrent(); }
 }
-function stopRun() {
+function stopRun(toToday) {
   clearInterval(RUN.tick); RUN.tick = null;
   stopAlarm();
-  RUN.active = false; releaseWake(); geoStop();
+  RUN.active = false; RUN.pending = null; releaseWake(); geoStop();
   document.body.style.overflow = "";
   const r = $("runner"); if (r) r.remove();
   renderAll();
-  if (exViewId) openExercise(exViewId);                   // refresh the page underneath
+  /* A finished session lands on Today, because what you just logged is now the
+     thing you want to look at, and the exercise page you started from has served
+     its purpose. Bailing out (✕ End) still returns you to where you were. */
+  if (toToday) { closeExercise(); showTab("today"); }
+  else if (exViewId) openExercise(exViewId);              // refresh the page underneath
 }
 function endRun() {
   const secs = Math.round(elapsedNow());
@@ -2260,9 +2376,71 @@ function paintDist() {
   el.innerHTML = `<b>${fmtDist(km)}</b>`
     + (km > 0 ? ` <span class="s">${fmtPaceU(km, secs)}</span>` : ` <span class="w">tracking…</span>`);
 }
+/* The confirm screen is a phase of the run, like the count-in and the rest, so it
+   lives inside #runner rather than in the shared sheet modal — which sits at
+   z-index 60, under the runner's 80, and would have rendered invisibly. */
+function renderPending() {
+  const r = $("runner"), p = RUN.pending;
+  const ex = exById(RUN.exId) || { name: "?", cat: "", art: "generic" };
+  const mine = DB.logs.filter(l => l.exId === RUN.exId);
+  const prov = { exId: RUN.exId, secs: p.secs, km: p.km, load: ex.load || 0,
+                 rate: ex.rate || 0, met: exerciseMet(ex), date: todayStr() };
+  const gain = milestoneGained(ex, mine, prov);
+  const last = RUN.idx >= RUN.queue.length - 1;
+  const kg = latestWeightKg();
+  r.className = "runner confirm";
+  r.innerHTML = `
+    <div class="rtop">
+      <button id="pBack">‹ Back</button>
+      <span class="hint" style="margin:0;flex:1 1 auto;text-align:right">${
+        last ? "Last one" : `Set ${RUN.idx + 1} of ${RUN.queue.length}`}</span>
+    </div>
+    <div class="rhead">
+      <div class="rthumb">${art(ex.art)}</div>
+      <div style="min-width:0">
+        <div class="rname">${esc(ex.name)}</div>
+        <div class="rcat"><span class="dot" style="background:${catColor(ex.cat)}"></span>Log this set</div>
+      </div>
+    </div>
+    <div class="pbody2">
+      ${gain ? `<div class="mileban">
+        <div class="mi">${gain.ic}</div>
+        <div>
+          <div class="mh">Milestone — ${esc(gain.label)}</div>
+          <div class="ms">${esc(gain.totalTxt)} all time${
+            gain.also ? ` · and ${gain.also} more rung${gain.also > 1 ? "s" : ""} in one go` : ""}</div>
+        </div>
+      </div>` : ""}
+      <div class="confbig" id="pTime">${mmss(p.secs)}</div>
+      <div class="confsub">${p.secs < 3
+        ? "Under 3 seconds won't be logged"
+        : `${p.km > 0 ? fmtDist(p.km) + " · " + fmtPaceU(p.km, p.secs) + " · " : ""}${
+            kg ? Math.round(kcalFrom(p.secs, exerciseMet(ex), kg)) + " kcal" : "on the clock"}`}</div>
+      <div class="rctl conf">
+        <button id="pM5">−5s</button>
+        <button id="pM1">−1s</button>
+        <button id="pP1">+1s</button>
+        <button id="pP5">+5s</button>
+      </div>
+      ${p.trimmed > 0 ? `<div class="hint" style="text-align:center;margin:10px 0 0">${
+        p.trimmed}s already trimmed off the overtime — that's the walk back to the phone.</div>` : ""}
+    </div>
+    <div class="rctl">
+      <button id="pCancel">Cancel</button>
+      <button class="go" id="pOk">${last ? "Log it ✓" : "Log &amp; next ›"}</button>
+    </div>`;
+  $("pBack").onclick = cancelPending;
+  $("pCancel").onclick = cancelPending;
+  $("pOk").onclick = commitPending;
+  $("pM5").onclick = () => bumpPending(-5);
+  $("pM1").onclick = () => bumpPending(-1);
+  $("pP1").onclick = () => bumpPending(1);
+  $("pP5").onclick = () => bumpPending(5);
+}
 function renderRunner() {
   let r = $("runner");
   if (!r) { r = document.createElement("div"); r.id = "runner"; document.body.appendChild(r); }
+  if (RUN.pending) { renderPending(); return; }
   const ex = exById(RUN.exId) || { name: "?", cat: "", art: "generic" };
   const resting = RUN.resting;
   const nextEx = exById(RUN.queue[RUN.idx + 1]);
@@ -3025,6 +3203,52 @@ function paintBody() {
 }
 // Weight over time. Single series, so no legend; the healthy-BMI band is drawn
 // behind it as context rather than as a second series.
+/* Bars, not a line. Weekly totals are discrete buckets with real zeros in them,
+   and a line through a zero implies a gradual decline that didn't happen — you
+   just didn't train that week. Bars say that plainly.
+   The metric is whatever the exercise already counts (kg, km, reps, minutes), so
+   this needs no new per-exercise configuration to be meaningful. */
+const PROG_WEEKS = 12;
+function progressCard(ex, rows) {
+  if (rows.length < 2) {
+    return `<div class="empty">Two sessions and the trend appears.</div>`;
+  }
+  const key = exMetricKey(ex), m = EX_METRICS[key];
+  const weeks = exWeekly(ex, rows, PROG_WEEKS);
+  const tr = exTrend(ex, rows, 4);
+  const peak = Math.max(...weeks.map(w => w.val));
+  const nameOf = { dist: "per week", vol: "lifted per week", time: "per week",
+                   reps: ex.art === "jumprope" ? "jumps per week" : "reps per week" };
+  const W = 300, H = 96, gap = 3;
+  const bw = (W - gap * (weeks.length - 1)) / weeks.length;
+  const bars = weeks.map((w, i) => {
+    const h = peak > 0 ? Math.max(w.val > 0 ? 2 : 0, w.val / peak * H) : 0;
+    const cur = i === weeks.length - 1;
+    return `<rect x="${(i * (bw + gap)).toFixed(1)}" y="${(H - h).toFixed(1)}"
+      width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="1.5"
+      fill="${cur ? "var(--accent2)" : "var(--accent)"}" opacity="${cur ? ".65" : "1"}"/>`;
+  }).join("");
+  const arrow = { up: "▲", down: "▼", flat: "→", new: "★" };
+  const word = { up: "up", down: "down", flat: "steady", new: "first block" };
+  return `<div class="kv" style="margin-top:0"><span>Best week</span><b>${m.fmt(peak)}</b></div>
+    <div class="kv"><span>Last 4 weeks</span><b>${m.fmt(tr ? tr.recent : 0)}</b></div>
+    ${tr ? `<div class="trend ${tr.dir}">${arrow[tr.dir]} ${esc(word[tr.dir])}${
+      /* the word already carries the direction, so the number is unsigned —
+         "down -54%" is a double negative that reads as a rise */
+      tr.dir === "new" ? " — nothing to compare against yet"
+        : tr.dir === "flat" ? " — within 5% of the 4 before"
+        : ` ${Math.abs(tr.pct)}% vs the 4 before`}</div>` : ""}
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+      style="width:100%;height:96px;display:block;margin-top:12px"
+      role="img" aria-label="${esc(m.fmt(peak))} best week, ${PROG_WEEKS} weeks shown">${bars}</svg>
+    <div class="bandlab" style="margin-top:4px">
+      <span>${PROG_WEEKS} weeks ago</span>
+      <span>${esc(nameOf[key])}</span>
+      <span>this week</span>
+    </div>
+    <div class="hint" style="margin-bottom:0">Weekly totals, so one big session doesn't
+      read as progress. The pale bar is the week you're in — it isn't finished yet.</div>`;
+}
 function weightChart(days) {
   const keys = weightKeys();
   const cut = days ? ymd(addDays(midnight(), -(days - 1))) : "";
@@ -3492,6 +3716,11 @@ function paintExercise() {
         return `<div class="kv" style="margin-top:8px"><span>Last lifted</span><b>${fmtW(withLoad[0].load)}</b></div>`
           + (heaviest > withLoad[0].load ? `<div class="kv"><span>Heaviest</span><b>${fmtW(heaviest)}</b></div>` : "");
       })()}
+    </div>
+
+    <div class="card">
+      <h2>Progress</h2>
+      ${progressCard(e, mine)}
     </div>
 
     <div class="card">
