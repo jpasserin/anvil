@@ -404,6 +404,10 @@
   .trend{margin-top:9px;font-size:13.5px;font-weight:700;}
   .trend.up{color:var(--good)} .trend.down{color:var(--warn)}
   .trend.flat,.trend.new{color:var(--muted)}
+  /* deliberately the smallest, dimmest thing on the screen — it is a temporary
+     diagnostic for why a measured distance reads short, not information */
+  .gdiag{margin:14px 0 0;text-align:center;font-size:10.5px;line-height:1.5;
+    color:var(--muted);opacity:.75;font-variant-numeric:tabular-nums;}
   .rprog{display:flex;gap:3px;margin-top:12px;}
   .rprog i{flex:1 1 0;height:4px;border-radius:2px;background:var(--line);}
   .rprog i.done{background:var(--good)} .rprog i.now{background:var(--accent)}
@@ -777,7 +781,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "18";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "19";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
@@ -1183,13 +1187,34 @@ function haversineKm(a, b) {
     + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
   return 2 * EARTH_KM * Math.asin(Math.min(1, Math.sqrt(s)));
 }
-// a fix is { lat, lon, acc (metres), t (ms) }; state is { km, last, kept, dropped }
-const gpsInit = () => ({ km: 0, last: null, kept: 0, dropped: 0 });
+/* A fix is { lat, lon, acc (metres), t (ms) }.
+
+   Alongside the filtered total the state carries counters that exist only to
+   answer "why is the number wrong?", because the two ways this can under-report
+   need opposite fixes and look identical from the outside:
+
+     · the watch isn't firing — a backgrounded PWA gets fixes when the OS feels
+       like it, and distance nobody measured is distance that never happened.
+       `fixes` against the elapsed seconds says so immediately.
+     · the jitter floor is eating real walking — then `fixes` is healthy,
+       `dropped` dwarfs `kept`, and `raw` is far above `km`.
+
+   `raw` re-anchors on every accepted fix, so it is the over-reporting total the
+   filter exists to prevent — useless as a distance, decisive as a comparison. */
+const gpsInit = () => ({ km: 0, raw: 0, last: null, rawLast: null,
+                         kept: 0, dropped: 0, fixes: 0, badAcc: 0, accSum: 0, accN: 0 });
 function gpsAdd(st, fix) {
-  const s = { km: st.km || 0, last: st.last || null, kept: st.kept || 0, dropped: st.dropped || 0 };
-  if (!fix || !isFinite(fix.lat) || !isFinite(fix.lon) || !(fix.acc <= GPS_MAX_ACC)) {
-    s.dropped++; return s;
+  const s = Object.assign(gpsInit(), st);
+  s.fixes++;
+  if (!fix || !isFinite(fix.lat) || !isFinite(fix.lon)) { s.dropped++; return s; }
+  s.accSum += fix.acc; s.accN++;
+  if (!(fix.acc <= GPS_MAX_ACC)) { s.dropped++; s.badAcc++; return s; }
+  // raw keeps its own anchor, which advances every time — that is the point of it
+  if (s.rawLast) {
+    const r = haversineKm(s.rawLast, fix), rdt = (fix.t - s.rawLast.t) / 1000;
+    if (!(rdt > 0 && r / (rdt / 3600) > GPS_MAX_KMH)) s.raw += r;
   }
+  s.rawLast = fix;
   if (!s.last) { s.last = fix; s.kept++; return s; }       // the first fix is the anchor
   const km = haversineKm(s.last, fix);
   const floor = Math.max(GPS_MIN_JITTER, fix.acc, s.last.acc) / 1000;
@@ -1198,6 +1223,20 @@ function gpsAdd(st, fix) {
   if (dt > 0 && km / (dt / 3600) > GPS_MAX_KMH) { s.dropped++; s.last = fix; return s; }
   s.km += km; s.last = fix; s.kept++;
   return s;
+}
+/* One muted line, shown on the confirm screen only while a set measured
+   distance. It is a diagnostic, not a feature: nothing here is stored, synced or
+   charted, and it comes off once the distance is trustworthy. */
+function gpsDiag(g, secs) {
+  if (!g || !g.fixes) return "";
+  const hz = secs > 0 ? g.fixes / secs : 0;
+  const acc = g.accN > 0 ? Math.round(g.accSum / g.accN) : 0;
+  // a watch firing every second lands just under 1/s once the last fix is counted,
+  // so the cutoff is below 1 — "1 per 1s" is a silly way to write "1/s"
+  return `${g.fixes} fixes (${hz >= 0.75 ? Math.round(hz * 10) / 10 + "/s"
+    : "1 per " + Math.round(1 / hz) + "s"})`
+    + ` · ${g.kept} kept, ${g.dropped} dropped${g.badAcc ? ` (${g.badAcc} too vague)` : ""}`
+    + ` · ±${acc} m · raw ${Math.round(g.raw * 1000)} m`;
 }
 /* Two ways to read the same two numbers. Pace (min/km) is the runner's
    convention and stays in the CSV column, but the app *shows* speed, because
@@ -2404,6 +2443,8 @@ function renderPending() {
   const gain = milestoneGained(ex, mine, prov);
   const last = RUN.idx >= RUN.queue.length - 1;
   const kg = latestWeightKg();
+  // read off RUN.geo, which is still alive here — geoStop() only runs in stopRun
+  const diag = p.km > 0 ? gpsDiag(RUN.geo, p.secs) : "";
   r.className = "runner confirm";
   r.innerHTML = `
     <div class="rtop">
@@ -2440,6 +2481,7 @@ function renderPending() {
       </div>
       ${p.trimmed > 0 ? `<div class="hint" style="text-align:center;margin:10px 0 0">${
         p.trimmed}s already trimmed off the overtime — that's the walk back to the phone.</div>` : ""}
+      ${diag ? `<div class="gdiag">${esc(diag)}</div>` : ""}
     </div>
     <div class="rctl">
       <button id="pCancel">Cancel</button>
