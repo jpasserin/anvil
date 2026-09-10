@@ -408,6 +408,17 @@
      diagnostic for why a measured distance reads short, not information */
   .gdiag{margin:14px 0 0;text-align:center;font-size:10.5px;line-height:1.5;
     color:var(--muted);opacity:.75;font-variant-numeric:tabular-nums;}
+  /* the implausible-speed warning. Amber and bordered like the milestone banner,
+     because both are "look at this before you tap Log", but with the fix as a
+     button inside it — a warning you can't act on is just nagging. */
+  .sban{margin:16px 0 0;padding:12px 13px;border-radius:14px;text-align:left;
+    background:#241a0e;border:1px solid var(--warn);color:var(--warn);}
+  .sban.ok{background:#111a24;border-color:var(--line);color:var(--muted);}
+  .sban .sh{font-size:13.5px;font-weight:800;}
+  .sban .ss{font-size:11.5px;opacity:.85;margin-top:3px;line-height:1.45;}
+  .sban button{margin-top:10px;width:100%;min-height:40px;font-size:12.5px;font-weight:700;
+    background:var(--card2);border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;cursor:pointer;}
   .rprog{display:flex;gap:3px;margin-top:12px;}
   .rprog i{flex:1 1 0;height:4px;border-radius:2px;background:var(--line);}
   .rprog i.done{background:var(--good)} .rprog i.now{background:var(--accent)}
@@ -781,7 +792,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "19";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "20";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 6;
 const LSKEY = "anvil.db";
 
@@ -1255,6 +1266,31 @@ function fmtSpeed(km, secs) {
   if (!(v > 0) || !isFinite(v)) return "—";
   // one decimal is all the resolution a phone GPS actually has
   return String(Math.round(v * 10) / 10);
+}
+
+/* Does the measured distance imply a speed you could plausibly have walked?
+   The exercise already stores the speed you actually go, so there is a number to
+   check against without asking for one.
+
+   The band is deliberately asymmetric. Reading SHORT is the known failure — a
+   pocketed phone loses fixes, and the jitter floor cuts corners — so it is
+   caught early, at a third off. Reading LONG only happens from jitter, and a
+   genuinely brisk walk really can be half again the nominal speed, so that side
+   waits until the number is beyond argument. Both are wide enough that hills,
+   stops and traffic lights don't cry wolf.
+
+   Under two minutes nothing is checked: over 90 seconds a single dropped fix
+   swings the speed enough to make the comparison meaningless. */
+const SPEED_LOW = 0.65, SPEED_HIGH = 1.75, SPEED_MIN_SECS = 120;
+function speedSanity(ex, km, secs) {
+  if (!ex || !(ex.kmh > 0) || !(km > 0) || !(secs >= SPEED_MIN_SECS)) return null;
+  const got = speedKmh(km, secs), ratio = got / ex.kmh;
+  if (ratio >= SPEED_LOW && ratio <= SPEED_HIGH) return null;
+  return { dir: ratio < SPEED_LOW ? "short" : "long", got, want: ex.kmh, ratio,
+           // what the nominal speed says you covered — the fallback the log
+           // already uses whenever nothing was measured at all
+           estKm: ex.kmh * (secs / 3600),
+           off: Math.round(Math.abs(1 - ratio) * 100) };
 }
 /*</pure>*/
 function toast(msg, kind) {
@@ -2359,7 +2395,24 @@ function finishCurrent() {
   stopAlarm();
   buzz(60);
   if (!RUN.paused) { RUN.elapsed = elapsedNow(); RUN.paused = true; }
-  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), trimmed: raw - secs };
+  // gpsKm is kept alongside km so discarding an implausible measurement is
+  // reversible — km is what gets logged, gpsKm is what the watch actually said
+  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), gpsKm: geoKm(), trimmed: raw - secs };
+  renderRunner();
+}
+/* Throw away a measured distance that can't be right and fall back to the
+   estimate. Setting km to 0 IS the fallback: every metric already reads
+   `l.km > 0 ? l.km : secs × ex.kmh`, so a log with no distance is estimated
+   from your nominal speed exactly like a walk recorded without GPS. Nothing
+   special-cased, and the log stops claiming to have measured something. */
+function dropPendingDistance() {
+  if (!RUN.pending) return;
+  RUN.pending.km = 0;
+  renderRunner();
+}
+function keepPendingDistance() {
+  if (!RUN.pending) return;
+  RUN.pending.km = RUN.pending.gpsKm;
   renderRunner();
 }
 // ±1s because a tap or two is the correction, and ±5s because "it took me five
@@ -2445,6 +2498,10 @@ function renderPending() {
   const kg = latestWeightKg();
   // read off RUN.geo, which is still alive here — geoStop() only runs in stopRun
   const diag = p.km > 0 ? gpsDiag(RUN.geo, p.secs) : "";
+  const bad = speedSanity(ex, p.km, p.secs);
+  // dropped the measurement: the log falls back to the nominal speed, and the
+  // subline has to stop showing a distance it no longer claims to have measured
+  const est = p.km === 0 && p.gpsKm > 0 && ex.kmh > 0 ? ex.kmh * (p.secs / 3600) : 0;
   r.className = "runner confirm";
   r.innerHTML = `
     <div class="rtop">
@@ -2471,7 +2528,8 @@ function renderPending() {
       <div class="confbig" id="pTime">${mmss(p.secs)}</div>
       <div class="confsub">${p.secs < 3
         ? "Under 3 seconds won't be logged"
-        : `${p.km > 0 ? fmtDist(p.km) + " · " + fmtSpeedU(p.km, p.secs) + " · " : ""}${
+        : `${p.km > 0 ? fmtDist(p.km) + " · " + fmtSpeedU(p.km, p.secs) + " · "
+            : est > 0 ? "≈ " + fmtDist(est) + " estimated · " : ""}${
             kg ? Math.round(kcalFrom(p.secs, exerciseMet(ex), kg)) + " kcal" : "on the clock"}`}</div>
       <div class="rctl conf">
         <button id="pM5">−5s</button>
@@ -2481,6 +2539,21 @@ function renderPending() {
       </div>
       ${p.trimmed > 0 ? `<div class="hint" style="text-align:center;margin:10px 0 0">${
         p.trimmed}s already trimmed off the overtime — that's the walk back to the phone.</div>` : ""}
+      ${bad ? `<div class="sban">
+        <div class="sh">⚠ ${fmtSpeed(p.km, p.secs)} km/h — ${bad.off}% ${
+          bad.dir === "short" ? "under" : "over"} your usual ${bad.want} km/h</div>
+        <div class="ss">${bad.dir === "short"
+          ? `The GPS probably lost you. At ${bad.want} km/h you covered about ${fmtDist(bad.estKm)}.`
+          : `That's faster than this exercise expects — jitter inflates distance. At ${
+              bad.want} km/h it would be about ${fmtDist(bad.estKm)}.`}</div>
+        <button id="pDropKm">Use the ${fmtDist(bad.estKm)} estimate instead</button>
+      </div>` : ""}
+      ${est > 0 ? `<div class="sban ok">
+        <div class="sh">Estimated from ${ex.kmh} km/h</div>
+        <div class="ss">The measurement is discarded — this logs as ${fmtDist(est)},
+          the same way a walk recorded without GPS does.</div>
+        <button id="pKeepKm">Put the measured ${fmtDist(p.gpsKm)} back</button>
+      </div>` : ""}
       ${diag ? `<div class="gdiag">${esc(diag)}</div>` : ""}
     </div>
     <div class="rctl">
@@ -2494,6 +2567,8 @@ function renderPending() {
   $("pM1").onclick = () => bumpPending(-1);
   $("pP1").onclick = () => bumpPending(1);
   $("pP5").onclick = () => bumpPending(5);
+  if ($("pDropKm")) $("pDropKm").onclick = dropPendingDistance;
+  if ($("pKeepKm")) $("pKeepKm").onclick = keepPendingDistance;
 }
 function renderRunner() {
   let r = $("runner");
