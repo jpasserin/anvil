@@ -69,6 +69,16 @@
   .strk3.broken .ic{filter:grayscale(1);opacity:.4;}
   .strk3 .cnt{font-size:24px;font-weight:800;margin-top:7px;line-height:1;}
   .strk3 .cnt small{font-size:11px;font-weight:600;color:var(--muted);}
+  /* three medal runs in the space one number used to have */
+  /* 57px is the ic+cnt stack the other two tiles make, so the labels below
+     still line up across all three */
+  .strk3 .mrun{display:flex;gap:2px;justify-content:center;align-items:center;min-height:57px;}
+  .strk3 .mq{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;}
+  /* a run at zero dims but is never greyed out — which medal is which is the
+     one thing this tile always has to say */
+  .strk3 .mq.off{opacity:.5;}
+  .strk3 .mq .mi{font-size:19px;line-height:1;}
+  .strk3 .mq .mn{font-size:16px;font-weight:800;line-height:1;}
   .strk3 .lbl{font-size:10px;color:var(--muted);margin-top:5px;line-height:1.2;}
   .strk3 .need{font-size:10px;font-weight:700;margin-top:5px;line-height:1.2;color:var(--accent2);}
   .strk3 .need.met{color:var(--good);}
@@ -255,6 +265,15 @@
   .badge .bbar i{display:block;height:100%;background:var(--accent2);}
   .badge .bp{font-size:8px;color:var(--muted);}
   .badge .bp.done{color:var(--good);font-weight:700;}
+  .badge{cursor:pointer;}
+  .badge:active{transform:scale(.96);}
+  /* the badge explainer: what the grid has no room to say */
+  .bsd{font-size:13.5px;color:var(--txt);margin:-4px 0 12px;}
+  .bsbar{height:8px;background:var(--line);border-radius:5px;overflow:hidden;margin-bottom:7px;}
+  .bsbar i{display:block;height:100%;border-radius:5px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .bstat{font-size:12.5px;font-weight:700;color:var(--accent2);margin-bottom:12px;}
+  .bstat.done{color:var(--good);}
 
   /* ---- body / weight ---- */
   .rangebtns{display:flex;gap:6px;margin-bottom:12px;}
@@ -346,6 +365,8 @@
   .minical .mcgrid button.today{box-shadow:inset 0 0 0 3px #fff;}
   .minical .mcgrid button .scn{font-size:15px;}
   .minical .mcgrid button .scm{font-size:8px;opacity:.85;font-weight:600;min-height:8px;}
+  /* the medal stamped on a week's first cell is a glyph, not a caption */
+  .minical .mcgrid button .scm.mdl{font-size:13px;opacity:1;line-height:1;}
 
   /* ---- full-page overlay (exercise detail) ---- */
   .fpage{position:fixed;inset:0;z-index:55;background:var(--bg);display:none;flex-direction:column;}
@@ -865,7 +886,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "21";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "22";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -1693,6 +1714,9 @@ function weekSecs(mondayKey) {
   return s;
 }
 const weekMet = mondayKey => goalsWeekMet(liveGoals(), DB.exercises, DB.logs, mondayKey);
+// the medal the week earned, and whether a given medal is even on offer in it
+const weekMedal = mondayKey => goalsWeekMedal(liveGoals(), DB.exercises, DB.logs, mondayKey);
+const weekCanTier = (mondayKey, k) => goalsWeekCanTier(liveGoals(), DB.exercises, mondayKey, k);
 // this week's state for one goal, everything the cards need in one object
 function goalState(g, wk) {
   const rev = goalRev(g, wk), tiers = goalTiers(rev);
@@ -1737,14 +1761,15 @@ function yearGoalMin(y) {
 
 /* ---- streaks ----
    'any'  : consecutive days with any training at all
-   'week' : consecutive weeks that hit the weekly goal
+   'week' : consecutive weeks that earned a medal — counted three times over,
+            once per tier, since a gold week also extends the bronze run
    'gap'  : consecutive days never having two rest days back to back — the one
             that actually suits training, where a rest day is earned, not a miss.
    Today (or the current week) is always graced: it can't break a streak until
    it's over, so the number never dips just because it's 7am.                */
 const STREAK_DEFS = [
   { k: "any",  ic: "🌱", lbl: "every day",     unit: "d" },
-  { k: "week", ic: "🔥", lbl: "every goal",    unit: "w" },
+  { k: "week", ic: "🏅", lbl: "medal weeks",   unit: "w" },
   { k: "gap",  ic: "🛡️", lbl: "no 2 days off", unit: "d" }
 ];
 function meetsDay(k, kind) {
@@ -1785,11 +1810,18 @@ function dayStreak(kind) {
   }
   return { cur, best, last };
 }
-function weekStreak() {
+/* Weeks in a row at this medal or better. Three independent runs rather than
+   one: a silver week keeps the bronze streak alive too, so "at least bronze"
+   and "all gold" have to be counted separately — and the gold run is the one
+   worth chasing. The current week is graced exactly like the day streaks, so
+   Monday morning never looks like a collapse. */
+function medalStreak(tier) {
+  const need = medalRank(tier) || 1;
+  const at = k => medalRank(weekMedal(k)) >= need;
   const firstK = firstLogDate();
   let cur = 0, w = weekStart(new Date());
-  if (!weekMet(ymd(w))) w = addDays(w, -7);                // current week graced
-  while (weekMet(ymd(w))) {
+  if (!at(ymd(w))) w = addDays(w, -7);                     // current week graced
+  while (at(ymd(w))) {
     cur++; w = addDays(w, -7);
     if (!firstK || ymd(addDays(w, 6)) < firstK) break;
   }
@@ -1798,12 +1830,14 @@ function weekStreak() {
     let c = weekStart(fromYmd(firstK)); const end = weekStart(new Date());
     while (c <= end) {
       const k = ymd(c);
-      if (weekMet(k)) { run++; if (run > best) best = run; last = k; } else run = 0;
+      if (at(k)) { run++; if (run > best) best = run; last = k; } else run = 0;
       c = addDays(c, 7);
     }
   }
   return { cur, best, last };
 }
+// the old weekly-goal streak is the bronze run: every goal met, whatever the tier
+const weekStreak = () => medalStreak("bronze");
 const streakInfo = kind => kind === "week" ? weekStreak() : dayStreak(kind);
 // What it takes to keep this streak alive today.
 function streakNeed(kind) {
@@ -1817,14 +1851,27 @@ function streakNeed(kind) {
       : { ok: false, txt: "train today", risk: true };
   }
   const wk = weekKeyOf(new Date());
-  const open = goalsInWeek(wk).map(g => goalState(g, wk)).filter(s => !s.medal);
-  if (!goalsInWeek(wk).length) return { ok: false, txt: "set a goal", risk: false };
-  if (!open.length) return { ok: true };
+  const sts = goalsInWeek(wk).map(g => goalState(g, wk));
+  if (!sts.length) return { ok: false, txt: "set a goal", risk: false };
+  // goals still short of a given tier, and how much the nearest one needs
+  const short = r => sts.filter(s => medalRank(s.medal) < r);
+  const gap = (s, k) => `+${goalGap(s.g, s.tiers[k] - s.val)}`;
+  const open = short(1);
   // one goal left is worth naming; several is a number, because four goal
   // names don't fit on a streak row
-  return { ok: false, risk: false, txt: open.length === 1
-    ? `+${goalFmt(open[0].g, open[0].tiers.bronze - open[0].val)} ${esc(open[0].g.name.toLowerCase())}`
+  if (open.length) return { ok: false, risk: false, txt: open.length === 1
+    ? `${gap(open[0], "bronze")} ${esc(open[0].g.name.toLowerCase())}`
     : `${open.length} goals to go` };
+  /* Bronze is in the bag, so the streak is safe either way — from here the text
+     is upside rather than warning: the next medal the whole week could still
+     take, and what it would cost. */
+  const nx = MEDAL_ASC.find(m => m.k !== "bronze"
+    && weekCanTier(wk, m.k) && short(MEDAL_RANK[m.k]).length);
+  if (!nx) return { ok: true, txt: `${MEDAL[weekMedal(wk) || "bronze"].ic} week` };
+  const rem = short(MEDAL_RANK[nx.k]);
+  return { ok: true, txt: rem.length === 1
+    ? `${gap(rem[0], nx.k)} for ${nx.ic}`
+    : `${rem.length} to go for ${nx.ic}` };
 }
 
 /* ---- calendar heat: sequential, keyed to the day's share of the weekly goal ---- */
@@ -1867,6 +1914,16 @@ const fmtDist = km => {
 const goalFmt = (g, v) => g.metric === "dist"
   ? (v > 0 ? fmtDist(v) : "0 " + dUnit())
   : (v >= 60 ? fmtHM(v) : Math.round(v) + " min");
+/* What's still owed, rounded the unhelpful way on purpose: 24 seconds short of
+   a 3-minute goal is "+1 min", never "+0 min", because a gap you haven't closed
+   can't honestly ask for nothing. */
+const goalGap = (g, v) => goalFmt(g, g.metric === "dist"
+  ? Math.max(0.001, v) : Math.max(1, Math.ceil(v)));
+/* And the running total is floored for the same reason from the other side: 2
+   min 36 s against a 3-minute tier has to read "2 / 3", not a "3 / 3" that looks
+   met while the line under it still asks for "+1 min". Distances already carry
+   two decimals, so only whole minutes can collide like that. */
+const goalNow = (g, v) => g.metric === "dist" ? goalToInput(g, v) : Math.floor(v);
 const goalUnit = g => g.metric === "dist" ? dUnit() : "min";
 // what the editor's number fields speak, so an imperial user types miles
 const goalToInput = (g, v) => g.metric === "dist" ? Math.round(toDisplayD(v) * 100) / 100 : Math.round(v);
@@ -2195,8 +2252,8 @@ const BADGES = [
   { id: "str7",     ic: "🔥", name: "Week alight",       desc: "7 days in a row",                   goal: 7,     val: b => b.bestAny },
   { id: "str30",    ic: "🌋", name: "Month alight",      desc: "30 days in a row",                  goal: 30,    val: b => b.bestAny },
   { id: "gap30",    ic: "🛡️", name: "No two off",        desc: "30 days without two rest days",     goal: 30,    val: b => b.bestGap },
-  { id: "wk4",      ic: "🎯", name: "Four in a row",     desc: "Hit the weekly goal 4 weeks running", goal: 4,   val: b => b.bestWeek },
-  { id: "wk12",     ic: "🏆", name: "A season",          desc: "Hit the weekly goal 12 weeks running", goal: 12, val: b => b.bestWeek },
+  { id: "wk4",      ic: "🎯", name: "Four in a row",     desc: "4 medal weeks running",             goal: 4,     val: b => b.bestWeek },
+  { id: "wk12",     ic: "🏆", name: "A season",          desc: "12 medal weeks running",            goal: 12,    val: b => b.bestWeek },
   { id: "full7",    ic: "🗓️", name: "Perfect week",      desc: "Train all 7 days of one week",      goal: 1,     val: b => b.perfectWeeks },
   { id: "rainbow",  ic: "🌈", name: "Well rounded",      desc: "All 5 categories in one week",      goal: 1,     val: b => b.rainbowWeeks },
   { id: "stretch20",ic: "🧘", name: "Limber",            desc: "20 stretch sessions",               goal: 20,    val: b => b.stretchSessions },
@@ -2209,6 +2266,33 @@ const BADGES = [
   { id: "early10",  ic: "🌅", name: "Early bird",        desc: "10 sessions before 7am",            goal: 10,    val: b => b.early },
   { id: "variety20",ic: "🎲", name: "Explorer",          desc: "20 different exercises tried",      goal: 20,    val: b => b.distinct }
 ];
+/* One line of criterion fits the grid; tapping a badge wants the rest — what
+   exactly is being counted, and in what unit. "50 hours" is stored as 3000
+   minutes, and a bare "1200 / 3000" doesn't say which of the two it is. */
+const BADGE_INFO = {
+  first:     { u: "sessions", how: "Anything logged counts: the timer, Today's ✎ enter minutes, or a day you filled in afterwards." },
+  s50:       { u: "sessions", how: "One session is one logged entry, so a 3-set run of the same exercise counts as three." },
+  s250:      { u: "sessions", how: "Same count as Fifty sessions — every entry in the log, however it got there." },
+  h1:        { u: "min",      how: "Time on the clock, added up across every session ever. Rest between sets isn't training, so it isn't counted." },
+  h10:       { u: "min",      how: "600 minutes. Overtime counts, minus the 3 seconds trimmed off each set for walking back to the phone." },
+  h50:       { u: "min",      how: "3000 minutes. Editing a session's duration moves this, because it's derived from the log rather than banked." },
+  str7:      { u: "days",     how: "The 🌱 streak's best-ever run: consecutive days with at least one session. An old run still counts after you break it." },
+  str30:     { u: "days",     how: "Thirty consecutive days. Today never breaks a streak — the count only drops once the day is over." },
+  gap30:     { u: "days",     how: "The 🛡️ streak's best run. One rest day is fine and keeps it alive; two back to back ends it." },
+  wk4:       { u: "weeks",    how: "The 🥉 medal run's best: weeks where every goal that was live reached at least bronze. Silver and gold weeks count too." },
+  wk12:      { u: "weeks",    how: "Twelve of those in a row — a full season of not missing a week." },
+  full7:     { u: "weeks",    how: "Seven different days of training inside one Monday-to-Sunday week. Two sessions on one day is still one day." },
+  rainbow:   { u: "weeks",    how: "Cardio, dumbbell, bodyweight, core and stretch, all in the same Monday-to-Sunday week." },
+  stretch20: { u: "sessions", how: "Sessions whose exercise sits in the Stretch category, whatever their length." },
+  vol1k:     { u: "kg",       how: "Volume is reps × load, summed over every session. Reps come from the exercise's cadence unless you entered a real count, and a session with no weight set adds nothing." },
+  vol10k:    { u: "kg",       how: "Ten tonnes of the same reps × load. Entering a load on a dumbbell exercise is what makes this move." },
+  kcal1k:    { u: "kcal",     how: "Each session is priced from its own MET and the body weight in force on its date, so it needs a height and weight in Settings to count at all." },
+  kcal25k:   { u: "kcal",     how: "Same arithmetic, twenty-five times over. Re-tuning an exercise's MET today doesn't rewrite what old sessions were worth." },
+  weigh10:   { u: "weigh-ins",how: "One per day you recorded a weight, from the Today card or the Body page. Correcting a day doesn't add another." },
+  weigh100:  { u: "weigh-ins",how: "A hundred days with a number on them — roughly twice a week for a year." },
+  early10:   { u: "sessions", how: "Sessions that started before 7am by the log's own timestamp. A day you filled in later gets a midday stamp, so it won't count." },
+  variety20: { u: "exercises",how: "Distinct exercises you've logged at least once. Forty sessions of one thing is still one exercise." }
+};
 function badgeStats() {
   const logs = DB.logs;
   const minutes = Math.round(logs.reduce((s, l) => s + (l.secs || 0), 0) / 60);
@@ -2392,6 +2476,10 @@ const MEDALS = [
   { k: "bronze", ic: "🥉", lbl: "Bronze", color: "#cd8b4f" }
 ];
 const MEDAL = Object.fromEntries(MEDALS.map(m => [m.k, m]));
+// bronze < silver < gold, and no medal is 0, so "at least silver" is a comparison
+const MEDAL_RANK = { bronze: 1, silver: 2, gold: 3 };
+const medalRank = m => MEDAL_RANK[m] || 0;
+const MEDAL_ASC = MEDALS.slice().reverse();       // bronze first, the way they're read
 
 // the revision in force for a week, or null if the goal didn't exist yet
 function goalRev(g, wk) {
@@ -2410,8 +2498,18 @@ function goalTiers(rev) {
   const silver = bronze + Math.max(0, rev.silver || 0);
   return { bronze, silver, gold: silver + Math.max(0, rev.gold || 0) };
 }
+/* A tier you never extended isn't a tier you can win. If silver adds nothing to
+   bronze then hitting bronze is bronze, not a free silver — which matters for
+   the migrated single goal, whose +0 / +0 would otherwise mint gold every week
+   it was simply met. Gold with a zero silver in front of it still works: the
+   gold number is the one you have to clear. */
 const goalMedalOf = (val, t) => !t ? null
-  : val >= t.gold ? "gold" : val >= t.silver ? "silver" : val >= t.bronze ? "bronze" : null;
+  : val >= t.gold && t.gold > t.silver ? "gold"
+  : val >= t.silver && t.silver > t.bronze ? "silver"
+  : val >= t.bronze ? "bronze" : null;
+// the tiers this goal can actually award, so the UI can grey out the rest
+const goalHasTier = (t, k) => !t ? false
+  : k === "bronze" ? t.bronze > 0 : k === "silver" ? t.silver > t.bronze : t.gold > t.silver;
 
 /* Which exercises count. `all` tracks the whole library, a category tracks
    itself as it grows, and exIds pin individual ones — the union of the three,
@@ -2457,12 +2555,31 @@ function goalWeekKeys(g) {
   for (let d = weekStart(new Date()); ymd(d) >= first && out.length < 520; d = addDays(d, -7)) out.unshift(ymd(d));
   return out;
 }
-// a week is met when every goal that was live in it reached at least bronze
-function goalsWeekMet(goals, exercises, rows, wk) {
+/* The week's medal is the *weakest* one its goals earned: gold means every goal
+   went gold, and a single goal left at bronze caps the whole week at bronze. One
+   goal missed outright and the week has no medal at all — which is the same test
+   the old weekly-goal streak used, so `goalsWeekMet` is now just "any medal". */
+function goalsWeekMedal(goals, exercises, rows, wk) {
   const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
-  if (!live.length) return false;
-  return live.every(g => goalMedalOf(goalWeekVal(g, exercises, rows, wk),
+  if (!live.length) return null;
+  let worst = 3;
+  for (const g of live) {
+    const r = medalRank(goalMedalOf(goalWeekVal(g, exercises, rows, wk),
                                     goalTiers(goalRev(g, wk))));
+    if (!r) return null;
+    if (r < worst) worst = r;
+  }
+  return MEDALS.find(m => MEDAL_RANK[m.k] === worst).k;
+}
+// a week is met when every goal that was live in it reached at least bronze
+const goalsWeekMet = (goals, exercises, rows, wk) =>
+  !!goalsWeekMedal(goals, exercises, rows, wk);
+/* Can this week award that medal at all? A week whose goals have no gold number
+   set can't go gold, and the tile says so rather than showing a zero that looks
+   like a failure. */
+function goalsWeekCanTier(goals, exercises, wk, k) {
+  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
+  return live.length > 0 && live.every(g => goalHasTier(goalTiers(goalRev(g, wk)), k));
 }
 /*</pure>*/
 
@@ -3260,12 +3377,25 @@ function renderStreaks() {
     const broken = s.cur === 0 && !need.ok;
     const lastTxt = s.last ? fromYmd(s.last).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
     const needTxt = need.ok ? (need.txt || "✓ safe today") : (need.risk ? "⚠ " : "") + need.txt;
+    /* The medal tile carries three runs instead of one big number: the same
+       week can be a 12-week bronze run and a 1-week gold one, and only seeing
+       all three tells you which way the month is going. */
+    const head = o.k !== "week" ? `<div class="ic">${o.ic}</div>
+      <div class="cnt">${s.cur}<small> ${o.unit}</small></div>`
+      : `<div class="mrun">${MEDAL_ASC.map(m => {
+          const r = medalStreak(m.k), can = weekCanTier(weekKeyOf(new Date()), m.k);
+          return `<div class="mq${r.cur ? "" : " off"}" title="${esc(m.lbl)}: ${
+            can ? r.cur + " week" + (r.cur === 1 ? "" : "s") + " running, best " + r.best
+                : "no " + m.k + " target set"}">
+            <span class="mi">${m.ic}</span><span class="mn">${can ? r.cur : "–"}</span></div>`;
+        }).join("")}</div>`;
     return `<div class="strk3 ${broken ? "broken" : ""} ${need.risk ? "risk" : ""}" data-streak="${o.k}">
-      <div class="ic">${o.ic}</div>
-      <div class="cnt">${s.cur}<small> ${o.unit}</small></div>
+      ${head}
       <div class="lbl">${o.lbl}</div>
       <div class="need${need.ok ? " met" : ""}">${needTxt}</div>
-      <div class="last">best ${s.best} · last ${lastTxt}</div>
+      ${/* on the medal tile 'best' has to say which run it's the best of, since
+           three are on show — it's the bronze one, i.e. any medal at all */""}
+      <div class="last">${o.k === "week" ? MEDAL.bronze.ic + " " : ""}best ${s.best} · last ${lastTxt}</div>
     </div>`;
   }).join("")}</div>`;
   box.querySelectorAll("[data-streak]").forEach(el => el.onclick = () => {
@@ -3287,9 +3417,12 @@ function goalCard(st, compact) {
         <span class="gn">${esc(g.name)}</span><span class="gv">no target</span></div>
       <div class="gsub">Tap to set what this week should add up to.</div></div>`;
   }
-  // measure against the next tier up, which is the whole point of having three
-  const next = val < tiers.bronze ? tiers.bronze : val < tiers.silver ? tiers.silver
-    : val < tiers.gold ? tiers.gold : tiers.gold;
+  /* Measure against the next tier up, which is the whole point of having three
+     — skipping any tier this goal never extended, so a goal with no silver
+     number doesn't claim you're "0 min from silver". */
+  const tierKs = MEDAL_ASC.filter(m => goalHasTier(tiers, m.k)).map(m => m.k);
+  const nextK = tierKs.find(k => val < tiers[k]);
+  const next = nextK ? tiers[nextK] : tiers[tierKs[tierKs.length - 1]];
   const pc = v => Math.max(0, Math.min(100, v / tiers.gold * 100));
   const el = weekElapsed(st.wk);
   const onPace = tiers.bronze * (el / 7);
@@ -3302,23 +3435,24 @@ function goalCard(st, compact) {
       <span class="gn">${esc(g.name)}</span>
       ${/* one unit for the pair, so a 55-minute week against a 60-minute tier
              doesn't read as "55 min / 1h" and make you do the conversion */""}
-      <span class="gv"><b>${goalToInput(g, val)}</b> / ${goalToInput(g, next)} ${esc(goalUnit(g))}</span>
+      <span class="gv"><b>${goalNow(g, val)}</b> / ${goalToInput(g, next)} ${esc(goalUnit(g))}</span>
       ${medal ? `<span class="gm" title="${MEDAL[medal].lbl}">${MEDAL[medal].ic}</span>` : ""}
     </div>
     <div class="tbar">
       <i class="${medal || ""}" style="width:${pc(val)}%"></i>
-      <u style="left:${pc(tiers.bronze)}%"></u><u style="left:${pc(tiers.silver)}%"></u>
+      <u style="left:${pc(tiers.bronze)}%"></u>${
+        goalHasTier(tiers, "silver") ? `<u style="left:${pc(tiers.silver)}%"></u>` : ""}
       ${val < tiers.bronze ? `<s style="left:${pc(onPace)}%"></s>` : ""}
     </div>
     ${compact ? "" : `<div class="tlab">
-      <span>${MEDALS.slice().reverse().map(m =>
-        `<${val >= tiers[m.k] ? "b" : "span"}>${m.ic} ${goalToInput(g, tiers[m.k])}</${
-          val >= tiers[m.k] ? "b" : "span"}>`).join(" ")} ${esc(goalUnit(g))}</span>
+      <span>${tierKs.map(k =>
+        `<${val >= tiers[k] ? "b" : "span"}>${MEDAL[k].ic} ${goalToInput(g, tiers[k])}</${
+          val >= tiers[k] ? "b" : "span"}>`).join(" ")} ${esc(goalUnit(g))}</span>
     </div>`}
     ${compact ? "" : `<div class="gsub">${
-      medal === "gold" ? `Gold. Nothing left to prove this week — ${goalFmt(g, val)} in.`
-      : `${goalFmt(g, left)} to ${medal === "silver" ? "gold" : medal === "bronze" ? "silver" : "bronze"}` +
-        `, about ${goalFmt(g, left / daysLeft)} a day for the ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` +
+      !nextK ? `${MEDAL[medal].lbl}. Nothing left to prove this week — ${goalFmt(g, val)} in.`
+      : `${goalGap(g, left)} to ${nextK}` +
+        `, about ${goalGap(g, left / daysLeft)} a day for the ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` +
         `${!medal && val < onPace ? " · behind pace" : ""}`
     } · ${st.n} exercise${st.n === 1 ? "" : "s"}</div>`}
   </div>`;
@@ -3940,15 +4074,37 @@ function renderBadges(elId, compact) {
   const next = st.filter(x => !x.earned).sort((a, b) => b.pct - a.pct);
   const show = compact ? earned.slice(-6).concat(next.slice(0, 2)) : earned.concat(next);
   const el = $(elId); if (!el) return;
-  el.innerHTML = `<div class="hint" style="margin:0 0 10px">${earned.length} of ${st.length} earned</div>`
+  el.innerHTML = `<div class="hint" style="margin:0 0 10px">${earned.length} of ${st.length} earned · tap one to see what it means</div>`
     + `<div class="badgegrid">${show.map(x => `
-      <div class="badge ${x.earned ? "on" : ""}" title="${esc(x.badge.desc)}">
+      <div class="badge ${x.earned ? "on" : ""}" data-badge="${x.badge.id}" title="${esc(x.badge.desc)}">
         <div class="bic">${x.badge.ic}</div>
         <div class="bn">${esc(x.badge.name)}</div>
         ${x.earned ? `<div class="bp done">earned</div>`
           : `<div class="bbar"><i style="width:${x.pct}%"></i></div>
              <div class="bp">${Math.floor(x.val)} / ${x.goal}</div>`}
       </div>`).join("")}</div>`;
+  el.querySelectorAll("[data-badge]").forEach(n => n.onclick = () => {
+    const x = st.find(y => y.badge.id === n.dataset.badge);
+    if (x) openBadge(x);
+  });
+}
+/* Tapping a badge explains it. A tile can only afford a name and a ratio, and
+   "1200 / 3000" doesn't say what the numbers are — so the criterion, the unit
+   and how it's derived live one tap away instead of in a title attribute no
+   phone will ever show. */
+function openBadge(x) {
+  const b = x.badge, inf = BADGE_INFO[b.id] || { u: "", how: "" };
+  const n = v => Math.floor(v).toLocaleString();
+  openSheet(`<h3>${b.ic} ${esc(b.name)}</h3>
+    <div class="bsd">${esc(b.desc)}</div>
+    ${x.earned
+      ? `<div class="bstat done">✓ earned — ${n(x.val)} ${esc(inf.u)} so far</div>`
+      : `<div class="bsbar"><i style="width:${x.pct}%"></i></div>
+         <div class="bstat">${n(x.val)} of ${n(x.goal)} ${esc(inf.u)}
+           <span class="muted">· ${Math.floor(x.pct)}%</span></div>`}
+    <div class="hint">${esc(inf.how)}</div>
+    <div class="btnrow" style="margin-top:16px"><button class="btn" id="bsOk">Got it</button></div>`,
+    () => { $("bsOk").onclick = closeSheet; });
 }
 function renderInsights(elId, limit) {
   const el = $(elId); if (!el) return;
@@ -4440,7 +4596,7 @@ let scKind = null, scMonth = null;
 const SC_COLORS = { any: "#4ade80", week: "#fbbf24", gap: "#7cb8ff" };
 function openStreakCal(kind, title) {
   scKind = kind;
-  $("scTitle").textContent = title + " — days that held";
+  $("scTitle").textContent = title + (kind === "week" ? " — weeks that held" : " — days that held");
   const t = new Date(); scMonth = new Date(t.getFullYear(), t.getMonth(), 1);
   $("streakCal").classList.add("show");
   renderStreakCal();
@@ -4455,12 +4611,29 @@ function renderStreakCal() {
   const first = dowMon(new Date(y, m, 1)), dim = daysInMonth(y, m), tk = todayStr();
   let hits = 0, pending = 0;
   for (let i = 0; i < first; i++) { const b = document.createElement("button"); b.className = "empty"; grid.appendChild(b); }
+  const wkSeen = {};                    // medal weeks are counted once, not seven times
   for (let d = 1; d <= dim; d++) {
     const k = `${y}-${pad2(m + 1)}-${pad2(d)}`;
     const mins = minsOn(k);
     const b = document.createElement("button");
-    // the weekly-goal streak is judged on the week, so its cells show the week's total instead of the day's
-    const sub = scKind === "week" ? (weekMet(weekKeyOf(fromYmd(k))) ? Math.round(weekSecs(weekKeyOf(fromYmd(k))) / 60) + "w" : "") : (mins > 0 ? mins + "m" : "");
+    /* The medal streak is judged on the week, so the whole row takes the week's
+       colour and the medal itself is stamped on the row's first cell — seven
+       copies of the same glyph would just be noise. */
+    if (scKind === "week") {
+      const wk = weekKeyOf(fromYmd(k)), md = weekMedal(wk);
+      const lead = dowMon(fromYmd(k)) === 0 || d === 1;
+      b.innerHTML = `<span class="scn">${d}</span><span class="scm${
+        md && lead ? " mdl" : ""}">${md && lead ? MEDAL[md].ic : ""}</span>`;
+      if (md) {
+        b.style.background = MEDAL[md].color; b.style.color = "#06101c";
+        b.title = `${MEDAL[md].lbl} week`;
+        if (!wkSeen[wk]) { wkSeen[wk] = md; hits++; }
+      }
+      if (k === tk) b.classList.add("today");
+      grid.appendChild(b);
+      continue;
+    }
+    const sub = mins > 0 ? mins + "m" : "";
     b.innerHTML = `<span class="scn">${d}</span><span class="scm">${sub}</span>`;
     if (meetsDay(k, scKind)) { b.style.background = col; b.style.color = "#06101c"; hits++; }
     else if (meetsDayLive(k, scKind)) {
@@ -4475,6 +4648,18 @@ function renderStreakCal() {
   const s = streakInfo(scKind);
   const def = STREAK_DEFS.find(x => x.k === scKind);
   const lastTxt = s.last ? fromYmd(s.last).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "—";
+  /* The medal calendar's tally is per tier, because "4 medal weeks" hides the
+     only interesting part — which medals they were — and each tier's run is a
+     separate number the tile is also showing. */
+  if (scKind === "week") {
+    const wks = Object.values(wkSeen);
+    $("scNote").innerHTML = MEDAL_ASC.map(md => {
+      const r = medalStreak(md.k);
+      return `${md.ic} <b>${wks.filter(x => medalRank(x) >= MEDAL_RANK[md.k]).length}</b> this month`
+        + ` · now <b>${r.cur}w</b>, best <b>${r.best}w</b>`;
+    }).join("<br>") + `<br><span class="muted">a week takes the medal its weakest goal earned</span>`;
+    return;
+  }
   $("scNote").innerHTML = `✅ ${hits} day${hits === 1 ? "" : "s"} this month`
     + (pending ? ` · <span style="color:var(--warn)">${pending} outlined = still savable today</span>` : "")
     + ` · now <b>${s.cur}${def.unit}</b> · best <b>${s.best}${def.unit}</b> · last ${lastTxt}`;
