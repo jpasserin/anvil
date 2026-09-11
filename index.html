@@ -87,6 +87,67 @@
   .bar .fill{height:100%;border-radius:8px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .3s;}
   .bar .pace{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--txt);opacity:.7;}
   .pacenote{font-size:12px;margin-top:7px;}
+  /* ---- weekly goals ---- */
+  .gcard{padding:13px 14px;border-radius:15px;background:var(--card2);border:1px solid var(--line);
+    margin-bottom:10px;cursor:pointer;}
+  .gcard:last-child{margin-bottom:0}
+  /* Today's copy is a row, not a card: the point of that tab is the button that
+     starts a session, so four goals must not push it off the screen */
+  .gcard.mini{padding:9px 11px;border-radius:12px;margin-bottom:7px;}
+  .gcard.mini .ghead{margin-bottom:6px;}
+  .gcard.mini .ghead .gi{font-size:16px}
+  .gcard.mini .ghead .gn{font-size:13px}
+  .gcard.mini .ghead .gv{font-size:11.5px}
+  .gcard.mini .ghead .gv b{font-size:12.5px}
+  .gcard.mini .ghead .gm{font-size:14px}
+  .gcard.mini .tbar{height:7px;border-radius:5px}
+  .gcard.done{border-color:var(--tint,var(--line));}
+  .ghead{display:flex;align-items:center;gap:9px;margin-bottom:9px;}
+  .ghead .gi{flex:0 0 auto;font-size:20px;line-height:1;}
+  .ghead .gn{flex:1;min-width:0;font-size:14.5px;font-weight:700;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap;}
+  .ghead .gv{flex:0 0 auto;font-size:13px;font-variant-numeric:tabular-nums;color:var(--muted);}
+  .ghead .gv b{color:var(--txt);font-size:14.5px;}
+  .ghead .gm{flex:0 0 auto;font-size:17px;line-height:1;}
+  /* the whole track is gold, so the ticks show how much of the week is left in
+     each tier rather than resetting the bar every time one is cleared */
+  .tbar{height:13px;border-radius:8px;background:var(--bg2);position:relative;overflow:hidden;}
+  .tbar i{position:absolute;left:0;top:0;bottom:0;border-radius:8px;transition:width .3s;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));}
+  .tbar i.bronze{background:linear-gradient(90deg,#8a5a2b,#cd8b4f);}
+  .tbar i.silver{background:linear-gradient(90deg,#8b949e,#dfe6ee);}
+  .tbar i.gold{background:linear-gradient(90deg,#c9922a,#ffd966);}
+  .tbar u{position:absolute;top:0;bottom:0;width:2px;background:var(--bg);opacity:.85;}
+  .tbar s{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--txt);opacity:.55;}
+  .tlab{display:flex;justify-content:space-between;margin-top:5px;font-size:10.5px;
+    color:var(--muted);font-variant-numeric:tabular-nums;}
+  .tlab b{font-weight:700;}
+  .gsub{margin-top:6px;font-size:11.5px;color:var(--muted);}
+  /* medal tally: one column per goal, one row per tier */
+  .mtal{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .mtal .mc{padding:10px 8px;border-radius:13px;
+    background:var(--card2);border:1px solid var(--line);text-align:center;}
+  .mtal .mn{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;margin-bottom:6px;}
+  .mtal .mr{display:flex;justify-content:center;gap:7px;font-size:12px;
+    font-variant-numeric:tabular-nums;}
+  .ghrow{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line);}
+  .ghrow:last-child{border-bottom:0}
+  .ghrow .gw{flex:0 0 62px;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .ghrow .gg{flex:1;display:flex;gap:5px;flex-wrap:wrap;}
+  .ghrow .gp{font-size:15px;line-height:1.1;}
+  .ghrow .gp.miss{opacity:.22;filter:grayscale(1);}
+  /* goal editor */
+  .gpick{display:flex;flex-wrap:wrap;gap:6px;}
+  .gpick button{padding:6px 10px;border-radius:999px;font-size:12px;cursor:pointer;
+    background:var(--card2);border:1px solid var(--line);color:var(--muted);}
+  .gpick button.on{border-color:var(--accent);color:var(--accent2);background:#12203a;}
+  .gpick button:disabled{cursor:default;}
+  /* an exercise that has no distance to give a distance goal: still pickable,
+     just visibly not pulling its weight */
+  .gpick button.nod{opacity:.42;}
+  .tierrow{display:flex;gap:8px;}
+  .tierrow .field{flex:1;min-width:0;margin-bottom:0;}
   .pacenote.ahead{color:var(--good)}
   .pacenote.behind{color:var(--bad)}
   .pacenote.on{color:var(--warn)}
@@ -458,11 +519,7 @@
     <div class="card">
       <h2>Streaks</h2>
       <div id="streaksBox"></div>
-      <div class="goalblock" id="weekBlock" style="margin-top:18px">
-        <div class="goalhead"><span class="lab">Weekly goal</span><span class="val edit" id="wkVal"></span></div>
-        <div class="bar"><div class="fill" id="wkFill"></div><div class="pace" id="wkPace"></div></div>
-        <div class="pacenote" id="wkNote"></div>
-      </div>
+      <div id="weekBlock" style="margin-top:18px"></div>
     </div>
 
     <div class="card">
@@ -623,19 +680,33 @@
     <div id="exList"></div>
   </section>
 
+  <!-- ===== GOALS ===== -->
+  <section class="tab" id="tab-goals">
+    <div class="card">
+      <h2>This week <span class="act" id="goalNew">+ new goal</span></h2>
+      <div id="goalsBox"></div>
+    </div>
+    <div class="card">
+      <h2>Medals</h2>
+      <div id="goalMedals"></div>
+    </div>
+    <div class="card">
+      <h2>Last weeks</h2>
+      <div id="goalHist"></div>
+    </div>
+  </section>
+
   <!-- ===== SETTINGS (reached from the header gear, not the nav) ===== -->
   <section class="tab" id="tab-settings">
     <div class="card">
-      <h2>Goals</h2>
-      <div class="field">
-        <label for="setWeekly">Default weekly goal (minutes)</label>
-        <input type="number" id="setWeekly" min="0" max="10000" step="15">
-      </div>
+      <h2>Goals <span class="act" id="setGoGoals">open the Goals tab ›</span></h2>
       <div class="field"><label for="setStart">First day</label>
         <input type="date" id="setStart" max="2036-12-31"></div>
-      <div class="hint">Each week stores its own goal the first time you change it from the Today tab,
-        so past weeks keep the target you actually had. The month and year targets only count
-        from your first day, so a year you joined in July isn't judged against all twelve months.</div>
+      <div class="hint" id="setGoalsOut"></div>
+      <div class="hint">Weekly targets live on the Goals tab, one per goal. Changing one applies
+        from this week on and leaves earlier weeks alone, so a medal you've earned stays earned.
+        The month and year targets only count from your first day, so a year you joined in July
+        isn't judged against all twelve months.</div>
     </div>
     <div class="card">
       <h2>You</h2>
@@ -737,6 +808,8 @@
     <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="7"/><rect x="12" y="7" width="3" height="11"/><rect x="17" y="13" width="3" height="5"/></svg>History</button>
   <button data-tab="ex">
     <svg viewBox="0 0 24 24"><path d="M4 9v6M20 9v6M7 6v12M17 6v12M7 12h10"/></svg>Exercises</button>
+  <button data-tab="goals">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M9 14.5 7 22l5-2.5 5 2.5-2-7.5"/></svg>Goals</button>
 </nav>
 
 <button class="fab" id="fab" aria-label="New exercise">+</button>
@@ -792,8 +865,8 @@
 
 <script>
 "use strict";
-const APP_VERSION = "20";          // keep equal to CACHE in sw.js; bump every change
-const SCHEMA_VERSION = 6;
+const APP_VERSION = "21";          // keep equal to CACHE in sw.js; bump every change
+const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
 /* =====================================================================
@@ -991,7 +1064,7 @@ const DEFAULT_EXERCISES = [
   ["Neck Roll", "stretch", 30, "neckroll", 0, 2.0]
 ];
 const DEF_SETTINGS = { beep: true, vib: true, wake: true, rest: 30,
-  weeklyGoalMin: 60, units: "metric", chime: "classic",
+  units: "metric", chime: "classic",
   syncUrl: "", syncToken: "", syncAuto: false };
 /* Timer cues belong to the exercise, not the app: a 30-second countdown makes
    sense on a 10-minute rope but is noise on a 1-minute curl. One list renders
@@ -1028,6 +1101,18 @@ const leadOf = ex => {
 const OVERTIME_TRIM = 3;
 const trimOvertime = (raw, dur, trim) =>
   dur > 0 && raw > dur ? Math.max(dur, raw - (trim == null ? OVERTIME_TRIM : trim)) : raw;
+
+/* The starting set of weekly goals: one per thing worth being deliberate
+   about, sized so bronze is a normal week and gold is a good one. Each is
+   [name, icon, metric, {cats|names}, bronze, +silver, +gold] — the selection
+   is by category where the whole category counts, and by name where it
+   doesn't, which is resolved against the seeded library in freshDB. */
+const DEF_GOALS = [
+  ["Walking",   "🥾", "dist", { names: ["Walking"] },      5,  3, 3],
+  ["Jump rope", "🪢", "time", { names: ["Jump Rope"] },   40, 10, 10],
+  ["Dumbbells", "🏋️", "time", { cats: ["dumbbell"] },     10,  3, 5],
+  ["Core",      "🧱", "time", { cats: ["core"] },         10,  3, 5]
+];
 /*</pure>*/
 
 /* ===================== storage ===================== */
@@ -1042,6 +1127,18 @@ function seedExercises() {
        // GPS defaults on for the ones whose whole point is covering ground
        lead: DEF_LEAD, gps: (kmh || 0) > 0, cues: Object.assign({}, DEF_CUES) }));
 }
+/* Resolve DEF_GOALS against a real library. Names that aren't there are
+   dropped rather than pinned to nothing, so a goal always has something to
+   count — and a goal with an empty selection is dropped entirely. */
+function seedGoals(ex, fromWeek) {
+  const from = fromWeek || ymd(weekStart(new Date()));
+  return DEF_GOALS.map(([name, ic, metric, sel, target, silver, gold], i) => ({
+    id: uid("gl"), name, ic, metric, ord: i, arch: false, all: false,
+    cats: (sel.cats || []).slice(),
+    exIds: (sel.names || []).map(n => (ex.find(e => e.name === n) || {}).id).filter(Boolean),
+    revs: [{ from, target, silver, gold }]
+  })).filter(g => g.cats.length || g.exIds.length);
+}
 function freshDB() {
   const ex = seedExercises();
   const pick = n => (ex.find(e => e.name === n) || {}).id;
@@ -1049,7 +1146,7 @@ function freshDB() {
     v: SCHEMA_VERSION,
     exercises: ex,
     logs: [],
-    weekGoals: {},                       // "YYYY-MM-DD" (Monday) -> minutes, set only when you change it
+    goals: seedGoals(ex),                // weekly goals, each with its own bronze/silver/gold
     routines: [
       { id: uid("rt"), name: "Morning Dumbbells", rest: 30,
         items: ["Bicep Curl", "Side Raise", "Shoulder Press", "Hammer Curl", "Front Raise"].map(pick).filter(Boolean) },
@@ -1072,7 +1169,6 @@ function migrate(d) {
   d.v = SCHEMA_VERSION;
   d.logs = d.logs || [];
   d.routines = d.routines || [];
-  d.weekGoals = d.weekGoals || {};                       // added in v2
   d.weights = d.weights || {};                           // added in v3
   d.waists = d.waists || {};                             // added in v4
   d.badges = d.badges || {};
@@ -1104,7 +1200,45 @@ function migrate(d) {
   // the settings they used to live in are gone; drop them rather than keep
   // a second copy that nothing reads
   ["tick", "cueMin", "cueHalf", "cue30"].forEach(k => delete d.settings[k]);
+  /* v7: the single weekly minutes goal became a list of goals. The old
+     per-week override map is already a revision history in everything but
+     name, so it converts straight across as one goal over the whole library
+     — every past week keeps the target it actually had, and the month and
+     year bars don't move. */
+  if (!d.goals) {
+    d.goals = [];
+    const base = Math.max(0, Math.round(d.settings.weeklyGoalMin || 0));
+    const overrides = d.weekGoals || {};
+    const keys = Object.keys(overrides).sort();
+    if (base > 0 || keys.length) {
+      // the goal starts the week you started, and the base target holds until
+      // the first week you changed it
+      const first = [ymd(weekStart(fromYmd(d.profile.startDate || firstLogDateIn(d) || todayStr()))),
+                     keys[0]].filter(Boolean).sort()[0];
+      const revs = [{ from: first, target: base, silver: 0, gold: 0 }];
+      keys.forEach(k => {
+        const target = Math.max(0, Math.round(overrides[k]));
+        if (target === revs[revs.length - 1].target) return;   // no revision, no change
+        if (k === revs[revs.length - 1].from) revs[revs.length - 1].target = target;
+        else revs.push({ from: k, target, silver: 0, gold: 0 });
+      });
+      d.goals.push({ id: uid("gl"), name: "Weekly training", ic: "🔥", metric: "time",
+                     ord: 0, arch: false, all: true, cats: [], exIds: [], revs });
+    } else {
+      d.goals = seedGoals(d.exercises);           // never set one; start from the defaults
+    }
+  }
+  d.goals.forEach((g, i) => {
+    g.cats = g.cats || []; g.exIds = g.exIds || []; g.ord = g.ord == null ? i : g.ord;
+    g.revs = (g.revs || []).slice().sort((a, b) => a.from < b.from ? -1 : 1);
+  });
+  delete d.weekGoals;
+  delete d.settings.weeklyGoalMin;
   return d;
+}
+// the earliest logged day in a database that isn't loaded yet, for migration
+function firstLogDateIn(d) {
+  return (d.logs || []).reduce((a, l) => !a || l.date < a ? l.date : a, "");
 }
 function load() {
   try {
@@ -1541,15 +1675,16 @@ function activeDays(fromK, toK) {
 const monthRange = (y, m) => ({ from: `${y}-${pad2(m + 1)}-01`, to: `${y}-${pad2(m + 1)}-${pad2(daysInMonth(y, m))}` });
 const yearRange = y => ({ from: `${y}-01-01`, to: `${y}-12-31` });
 
-/* ---- weekly goal: stored per week, falling back to the default ---- */
+/* ---- the week, measured against whatever goals were live in it ---- */
 const weekKeyOf = d => ymd(weekStart(d));
+const liveGoals = () => (DB.goals || []).filter(g => !g.arch).sort((a, b) => a.ord - b.ord);
+// goals that had a target in force that week, which is the set that week is judged on
+const goalsInWeek = wk => liveGoals().filter(g => goalTiers(goalRev(g, wk)));
+/* The week's minutes target is what its goals add up to, distance converted at
+   the pace of the exercises it covers. Two goals over the same exercise do
+   count twice — that is the user asking for both, not a bug to paper over. */
 function weekGoalMin(mondayKey) {
-  const o = DB.weekGoals ? DB.weekGoals[mondayKey] : undefined;
-  return o != null ? o : (DB.settings.weeklyGoalMin || 0);
-}
-function setWeekGoal(mondayKey, mins) {
-  DB.weekGoals = DB.weekGoals || {};
-  DB.weekGoals[mondayKey] = Math.max(0, Math.round(mins));
+  return liveGoals().reduce((t, g) => t + goalWeekMin(g, DB.exercises, mondayKey), 0);
 }
 function weekSecs(mondayKey) {
   const d = fromYmd(mondayKey);
@@ -1557,10 +1692,14 @@ function weekSecs(mondayKey) {
   for (let i = 0; i < 7; i++) s += secsOn(ymd(addDays(d, i)));
   return s;
 }
-const weekMet = mondayKey => {
-  const g = weekGoalMin(mondayKey);
-  return g > 0 && weekSecs(mondayKey) / 60 >= g;
-};
+const weekMet = mondayKey => goalsWeekMet(liveGoals(), DB.exercises, DB.logs, mondayKey);
+// this week's state for one goal, everything the cards need in one object
+function goalState(g, wk) {
+  const rev = goalRev(g, wk), tiers = goalTiers(rev);
+  const val = goalWeekVal(g, DB.exercises, DB.logs, wk);
+  return { g, wk, rev, tiers, val, medal: goalMedalOf(val, tiers),
+           n: goalExIds(g, DB.exercises).length };
+}
 // A month's target is the sum of its days' share of whatever weekly goal that day fell under,
 // so changing the goal mid-month is reflected honestly rather than retro-applied.
 /* You weren't here before your first day. Judging a year you began in July
@@ -1605,7 +1744,7 @@ function yearGoalMin(y) {
    it's over, so the number never dips just because it's 7am.                */
 const STREAK_DEFS = [
   { k: "any",  ic: "🌱", lbl: "every day",     unit: "d" },
-  { k: "week", ic: "🔥", lbl: "weekly goal",   unit: "w" },
+  { k: "week", ic: "🔥", lbl: "every goal",    unit: "w" },
   { k: "gap",  ic: "🛡️", lbl: "no 2 days off", unit: "d" }
 ];
 function meetsDay(k, kind) {
@@ -1677,9 +1816,15 @@ function streakNeed(kind) {
       ? { ok: true, txt: "rest day ok" }                   // one day off is allowed by design
       : { ok: false, txt: "train today", risk: true };
   }
-  const wk = weekKeyOf(new Date()), goal = weekGoalMin(wk);
-  const left = Math.max(0, Math.ceil(goal - weekSecs(wk) / 60));
-  return left <= 0 ? { ok: true } : { ok: false, txt: `+${left}m this week`, risk: false };
+  const wk = weekKeyOf(new Date());
+  const open = goalsInWeek(wk).map(g => goalState(g, wk)).filter(s => !s.medal);
+  if (!goalsInWeek(wk).length) return { ok: false, txt: "set a goal", risk: false };
+  if (!open.length) return { ok: true };
+  // one goal left is worth naming; several is a number, because four goal
+  // names don't fit on a streak row
+  return { ok: false, risk: false, txt: open.length === 1
+    ? `+${goalFmt(open[0].g, open[0].tiers.bronze - open[0].val)} ${esc(open[0].g.name.toLowerCase())}`
+    : `${open.length} goals to go` };
 }
 
 /* ---- calendar heat: sequential, keyed to the day's share of the weekly goal ---- */
@@ -1715,6 +1860,17 @@ const fmtDist = km => {
   const v = toDisplayD(km);
   return (v >= 100 ? Math.round(v) : Math.round(v * 100) / 100) + " " + dUnit();
 };
+/* A goal's value in its own metric. Distance goals are stored in km like
+   everything else and only converted here; a target of exactly 0 reads as a
+   plain "0" rather than fmtDist's em-dash, because "0 / 5 km" is the honest
+   start of a week. */
+const goalFmt = (g, v) => g.metric === "dist"
+  ? (v > 0 ? fmtDist(v) : "0 " + dUnit())
+  : (v >= 60 ? fmtHM(v) : Math.round(v) + " min");
+const goalUnit = g => g.metric === "dist" ? dUnit() : "min";
+// what the editor's number fields speak, so an imperial user types miles
+const goalToInput = (g, v) => g.metric === "dist" ? Math.round(toDisplayD(v) * 100) / 100 : Math.round(v);
+const goalFromInput = (g, v) => g.metric === "dist" ? fromDisplayD(Math.max(0, v)) : Math.max(0, Math.round(v));
 // pace is per displayed unit, so an imperial pace is min/mile, not min/km
 const fmtPaceU = (km, secs) => fmtPace(toDisplayD(km), secs) + "/" + dUnit();
 // and speed follows the same unit — mph rather than "mi/h", which nobody writes
@@ -2209,6 +2365,104 @@ function niceMax(v) {
   const steps = [5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1080, 1440, 2160, 2880];
   for (const s of steps) if (v <= s) return s;
   return Math.ceil(v / 600) * 600;
+}
+
+/* =====================================================================
+   WEEKLY GOALS
+   A goal is a set of exercises, a metric, and three rising targets. It is
+   met when the *combined* total for the week clears one of them.
+
+   Targets live in `revs` — one revision per week you changed them, each
+   stamped with the Monday it starts applying from. That is what makes a
+   medal permanent: raising this week's target cannot un-earn last month's
+   gold, because last month reads the revision that was in force then. A
+   week before the first revision has no target at all, so a goal created
+   today doesn't retroactively mark a year of failures.
+
+   The tiers are cumulative, which is the only reading that works for
+   "silver +3 km, gold +3 km" — gold has to sit above silver, not beside it.
+   ===================================================================== */
+const GOAL_METRICS = {
+  time: { unit: "min", ic: "⏱️" },
+  dist: { unit: "km",  ic: "🥾" }
+};
+const MEDALS = [
+  { k: "gold",   ic: "🥇", lbl: "Gold",   color: "#f5c542" },
+  { k: "silver", ic: "🥈", lbl: "Silver", color: "#c2ccd6" },
+  { k: "bronze", ic: "🥉", lbl: "Bronze", color: "#cd8b4f" }
+];
+const MEDAL = Object.fromEntries(MEDALS.map(m => [m.k, m]));
+
+// the revision in force for a week, or null if the goal didn't exist yet
+function goalRev(g, wk) {
+  if (!g || !g.revs || !g.revs.length) return null;
+  let out = null;
+  for (const r of g.revs) if (r.from <= wk && (!out || r.from >= out.from)) out = r;
+  return out;
+}
+/* Absolute thresholds, each stacking on the one below it. No bronze means no
+   tiers at all: a goal you haven't put a number on yet can't be failed, so it
+   stays off Today and out of the streak until you give it one. */
+function goalTiers(rev) {
+  if (!rev) return null;
+  const bronze = Math.max(0, rev.target || 0);
+  if (!(bronze > 0)) return null;
+  const silver = bronze + Math.max(0, rev.silver || 0);
+  return { bronze, silver, gold: silver + Math.max(0, rev.gold || 0) };
+}
+const goalMedalOf = (val, t) => !t ? null
+  : val >= t.gold ? "gold" : val >= t.silver ? "silver" : val >= t.bronze ? "bronze" : null;
+
+/* Which exercises count. `all` tracks the whole library, a category tracks
+   itself as it grows, and exIds pin individual ones — the union of the three,
+   so "all of Core plus Walking" is one goal rather than two. */
+function goalExIds(g, exercises) {
+  const live = exercises.filter(e => !e.arch);
+  if (!g) return [];
+  if (g.all) return live.map(e => e.id);
+  const cats = g.cats || [], ids = new Set(g.exIds || []);
+  live.forEach(e => { if (cats.includes(e.cat)) ids.add(e.id); });
+  return live.filter(e => ids.has(e.id)).map(e => e.id);
+}
+// the week's combined total, in the goal's own metric
+function goalWeekVal(g, exercises, rows, wk) {
+  const ids = new Set(goalExIds(g, exercises));
+  if (!ids.size) return 0;
+  const byId = Object.fromEntries(exercises.map(e => [e.id, e]));
+  const end = ymd(addDays(fromYmd(wk), 6));
+  const m = EX_METRICS[g.metric === "dist" ? "dist" : "time"];
+  return rows.reduce((s, l) => s + (ids.has(l.exId) && l.date >= wk && l.date <= end
+    ? m.of(l, byId[l.exId] || {}) : 0), 0);
+}
+/* Minutes this goal asks of the week, which is what the month and year bars
+   pace against. A distance goal converts at the average speed of the
+   exercises in it — 5 km of walking at 3.6 km/h is 83 minutes of walking,
+   and pretending otherwise would make the month target far too easy. */
+function goalWeekMin(g, exercises, wk) {
+  const t = goalTiers(goalRev(g, wk));
+  if (!t || !(t.bronze > 0)) return 0;
+  if (g.metric !== "dist") return t.bronze;
+  const speeds = goalExIds(g, exercises)
+    .map(id => (exercises.find(e => e.id === id) || {}).kmh || 0).filter(v => v > 0);
+  if (!speeds.length) return 0;
+  return t.bronze / (speeds.reduce((a, b) => a + b, 0) / speeds.length) * 60;
+}
+/* Every week this goal has been live for, oldest first, current week last.
+   Walked backwards from this week and capped at ten years, so a `from` in the
+   distant past drops the ancient end rather than losing the recent one. */
+function goalWeekKeys(g) {
+  const first = g.revs && g.revs.length ? weekKeyOf(fromYmd(g.revs[0].from)) : null;
+  if (!first) return [];
+  const out = [];
+  for (let d = weekStart(new Date()); ymd(d) >= first && out.length < 520; d = addDays(d, -7)) out.unshift(ymd(d));
+  return out;
+}
+// a week is met when every goal that was live in it reached at least bronze
+function goalsWeekMet(goals, exercises, rows, wk) {
+  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
+  if (!live.length) return false;
+  return live.every(g => goalMedalOf(goalWeekVal(g, exercises, rows, wk),
+                                    goalTiers(goalRev(g, wk))));
 }
 /*</pure>*/
 
@@ -2741,7 +2995,7 @@ let exViewId = null;
 
 function renderAll() {
   $("hdrDate").textContent = new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-  renderToday(); renderCal(); renderHistory(); renderExList(); renderSettings();
+  renderToday(); renderCal(); renderHistory(); renderExList(); renderGoals(); renderSettings();
 }
 
 /* ---------- shared bits ---------- */
@@ -3020,20 +3274,243 @@ function renderStreaks() {
   });
 }
 
+/* ---------- weekly goals ----------
+   One card renders the same goal on Today and on the Goals tab; Today drops
+   the footnote so four goals still fit above the fold. */
+const weekElapsed = wk => Math.min(7, Math.max(1, Math.round((midnight() - fromYmd(wk)) / 86400000) + 1));
+
+function goalCard(st, compact) {
+  const { g, tiers, val, medal } = st;
+  if (!tiers || !(tiers.bronze > 0)) {
+    return `<div class="gcard" data-goal="${g.id}">
+      <div class="ghead"><span class="gi">${g.ic || "🎯"}</span>
+        <span class="gn">${esc(g.name)}</span><span class="gv">no target</span></div>
+      <div class="gsub">Tap to set what this week should add up to.</div></div>`;
+  }
+  // measure against the next tier up, which is the whole point of having three
+  const next = val < tiers.bronze ? tiers.bronze : val < tiers.silver ? tiers.silver
+    : val < tiers.gold ? tiers.gold : tiers.gold;
+  const pc = v => Math.max(0, Math.min(100, v / tiers.gold * 100));
+  const el = weekElapsed(st.wk);
+  const onPace = tiers.bronze * (el / 7);
+  const left = Math.max(0, next - val);
+  const daysLeft = Math.max(1, 8 - el);
+  const tint = medal ? MEDAL[medal].color : "var(--line)";
+  return `<div class="gcard ${compact ? "mini" : ""} ${medal ? "done" : ""}" data-goal="${g.id}" style="--tint:${tint}">
+    <div class="ghead">
+      <span class="gi">${g.ic || "🎯"}</span>
+      <span class="gn">${esc(g.name)}</span>
+      ${/* one unit for the pair, so a 55-minute week against a 60-minute tier
+             doesn't read as "55 min / 1h" and make you do the conversion */""}
+      <span class="gv"><b>${goalToInput(g, val)}</b> / ${goalToInput(g, next)} ${esc(goalUnit(g))}</span>
+      ${medal ? `<span class="gm" title="${MEDAL[medal].lbl}">${MEDAL[medal].ic}</span>` : ""}
+    </div>
+    <div class="tbar">
+      <i class="${medal || ""}" style="width:${pc(val)}%"></i>
+      <u style="left:${pc(tiers.bronze)}%"></u><u style="left:${pc(tiers.silver)}%"></u>
+      ${val < tiers.bronze ? `<s style="left:${pc(onPace)}%"></s>` : ""}
+    </div>
+    ${compact ? "" : `<div class="tlab">
+      <span>${MEDALS.slice().reverse().map(m =>
+        `<${val >= tiers[m.k] ? "b" : "span"}>${m.ic} ${goalToInput(g, tiers[m.k])}</${
+          val >= tiers[m.k] ? "b" : "span"}>`).join(" ")} ${esc(goalUnit(g))}</span>
+    </div>`}
+    ${compact ? "" : `<div class="gsub">${
+      medal === "gold" ? `Gold. Nothing left to prove this week — ${goalFmt(g, val)} in.`
+      : `${goalFmt(g, left)} to ${medal === "silver" ? "gold" : medal === "bronze" ? "silver" : "bronze"}` +
+        `, about ${goalFmt(g, left / daysLeft)} a day for the ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` +
+        `${!medal && val < onPace ? " · behind pace" : ""}`
+    } · ${st.n} exercise${st.n === 1 ? "" : "s"}</div>`}
+  </div>`;
+}
+
 function renderWeekGoal() {
   const wk = weekKeyOf(new Date());
-  const goal = weekGoalMin(wk), mins = weekSecs(wk) / 60;
-  $("wkVal").textContent = `${fmtHM(mins)} / ${fmtHM(goal)} ✎`;
-  $("wkFill").style.width = (goal > 0 ? Math.min(100, mins / goal * 100) : 0) + "%";
-  const elapsed = Math.min(7, Math.round((midnight() - fromYmd(wk)) / 86400000) + 1);
-  $("wkPace").style.left = (elapsed / 7 * 100) + "%";
-  const daysLeft = Math.max(1, 8 - elapsed);
-  const perDay = Math.max(0, Math.round((goal - mins) / daysLeft));
-  if (goal > 0 && mins >= goal) {
-    const el = $("wkNote"); el.className = "pacenote ahead"; el.textContent = "Weekly goal reached 🏆";
-  } else {
-    paceNote("wkNote", mins, goal * (elapsed / 7), `${perDay} min/day to catch up`);
+  const gs = goalsInWeek(wk);
+  const box = $("weekBlock");
+  if (!gs.length) {
+    box.innerHTML = `<div class="empty" id="wkEmpty" style="cursor:pointer">
+      No weekly goals yet — tap to make one.</div>`;
+    $("wkEmpty").onclick = () => showTab("goals");
+    return;
   }
+  const sts = gs.map(g => goalState(g, wk));
+  const done = sts.filter(s => s.medal).length;
+  box.innerHTML = `<div class="goalhead">
+      <span class="lab">Weekly goals</span>
+      <span class="val edit" id="wkVal">${done}/${sts.length} met ›</span></div>
+    ${sts.map(s => goalCard(s, true)).join("")}`;
+  $("wkVal").onclick = () => showTab("goals");
+  box.querySelectorAll("[data-goal]").forEach(el =>
+    el.onclick = () => editGoal(DB.goals.find(g => g.id === el.dataset.goal)));
+}
+
+function renderGoals() {
+  const wk = weekKeyOf(new Date());
+  const gs = liveGoals();
+  const box = $("goalsBox");
+  box.innerHTML = gs.length
+    ? gs.map(g => goalCard(goalState(g, wk), false)).join("")
+      + `<div class="hint" style="margin-bottom:0">A goal is met when the exercises in it
+         <b>combine</b> to the target across the week. Changing a target applies from this
+         week on — earlier weeks keep the one they were judged against.</div>`
+    : `<div class="empty">No goals yet. A goal is a handful of exercises and a weekly
+       number — "5 km of walking", "40 minutes of rope".</div>`;
+  box.querySelectorAll("[data-goal]").forEach(el =>
+    el.onclick = () => editGoal(DB.goals.find(g => g.id === el.dataset.goal)));
+
+  // ---- medal tally, completed weeks only so it can't flicker mid-week
+  const tally = $("goalMedals");
+  tally.innerHTML = gs.length ? `<div class="mtal">${gs.map(g => {
+    const counts = { gold: 0, silver: 0, bronze: 0 };
+    goalWeekKeys(g).filter(k => k < wk).forEach(k => {
+      const m = goalMedalOf(goalWeekVal(g, DB.exercises, DB.logs, k), goalTiers(goalRev(g, k)));
+      if (m) counts[m]++;
+    });
+    return `<div class="mc"><div class="mn">${g.ic || "🎯"} ${esc(g.name)}</div>
+      <div class="mr">${MEDALS.map(m =>
+        `<span style="opacity:${counts[m.k] ? 1 : .3}">${m.ic}${counts[m.k]}</span>`).join("")}</div></div>`;
+  }).join("")}</div>
+    <div class="hint" style="margin-bottom:0">Finished weeks only. The week you're in doesn't
+      count until Sunday night, so a medal never appears and then vanishes.</div>`
+    : `<div class="empty">Medals arrive once a goal does.</div>`;
+
+  // ---- the last 8 finished weeks, one row each
+  const hist = $("goalHist");
+  const keys = [];
+  for (let i = 8; i >= 1; i--) keys.push(ymd(addDays(fromYmd(wk), -7 * i)));
+  const rows = keys.map(k => {
+    const live = goalsInWeek(k);
+    if (!live.length) return "";
+    const lab = fromYmd(k).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    return `<div class="ghrow"><div class="gw">${esc(lab)}</div><div class="gg">${live.map(g => {
+      const m = goalMedalOf(goalWeekVal(g, DB.exercises, DB.logs, k), goalTiers(goalRev(g, k)));
+      return `<span class="gp ${m ? "" : "miss"}" title="${esc(g.name)}">${
+        m ? MEDAL[m].ic : (g.ic || "🎯")}</span>`;
+    }).join("")}</div></div>`;
+  }).filter(Boolean);
+  hist.innerHTML = rows.length ? rows.reverse().join("")
+    : `<div class="empty">Nothing finished yet — this fills in from next Monday.</div>`;
+}
+
+/* The editor. Targets are entered as bronze plus two increments because that
+   is how the tiers were described to me — "silver +3 km, gold +3 km" — and
+   raising bronze then carries silver and gold up with it, which is almost
+   always what you meant. */
+function editGoal(g) {
+  const isNew = !g;
+  const wk = weekKeyOf(new Date());
+  const rev = g ? goalRev(g, wk) : null;
+  let metric = g ? g.metric : "time";
+  // the fields speak display units, so an imperial user types and reads miles
+  const raw = Object.assign({ target: 0, silver: 0, gold: 0 }, rev || {});
+  const cur = { target: goalToInput({ metric }, raw.target),
+                silver: goalToInput({ metric }, raw.silver),
+                gold: goalToInput({ metric }, raw.gold) };
+  let all = g ? !!g.all : false;
+  let cats = g ? (g.cats || []).slice() : [];
+  let exIds = g ? (g.exIds || []).slice() : [];
+  const live = DB.exercises.filter(e => !e.arch).sort((a, b) => a.ord - b.ord);
+  openSheet(`
+    <h3>${isNew ? "New weekly goal" : "Edit goal"}</h3>
+    <div class="tierrow" style="margin-bottom:12px">
+      <div class="field" style="flex:0 0 76px"><label for="glIc">Icon</label>
+        <input id="glIc" value="${esc(g ? g.ic || "🎯" : "🎯")}" maxlength="3" autocomplete="off"></div>
+      <div class="field"><label for="glName">Name</label>
+        <input id="glName" value="${esc(g ? g.name : "")}" placeholder="Walking" autocomplete="off"></div>
+    </div>
+    <div class="field"><label for="glMetric">Count</label>
+      <select id="glMetric">
+        <option value="time">Time — minutes per week</option>
+        <option value="dist">Distance — per week</option>
+      </select></div>
+    <div class="field"><label>Targets <span id="glTierOut" class="muted"></span></label>
+      <div class="tierrow">
+        <div class="field"><label for="glT" style="font-size:11px">🥉 bronze</label>
+          <input type="number" id="glT" min="0" step="1" value="${cur.target}"></div>
+        <div class="field"><label for="glS" style="font-size:11px">🥈 silver +</label>
+          <input type="number" id="glS" min="0" step="1" value="${cur.silver}"></div>
+        <div class="field"><label for="glG" style="font-size:11px">🥇 gold +</label>
+          <input type="number" id="glG" min="0" step="1" value="${cur.gold}"></div>
+      </div></div>
+    <div class="field"><label>Exercises <span id="glCount" class="muted"></span></label>
+      <div class="gpick" id="glCats"></div>
+      <div class="gpick" id="glEx" style="margin-top:8px"></div></div>
+    <div class="hint" id="glHint"></div>
+    <div class="btnrow">
+      <button class="btn sec" id="glCancel">Cancel</button>
+      <button class="btn" id="glSave">${isNew ? "Create" : "Save"}</button>
+    </div>
+    ${isNew ? "" : `<button class="btn danger" id="glDel" style="margin-top:8px">Delete goal</button>`}`,
+  () => {
+    $("glMetric").value = metric;
+    const paint = () => {
+      const gg = { metric, name: "", ic: "" };
+      const t = +$("glT").value || 0, s = +$("glS").value || 0, go = +$("glG").value || 0;
+      const u = goalUnit(gg);
+      $("glTierOut").textContent = t > 0 ? `· ${t} · ${t + s} · ${t + s + go} ${u}` : "";
+      // distance goals only make sense over exercises that produce a distance,
+      // so say so rather than letting a silent zero look like a bug
+      $("glCats").innerHTML = `<button data-all="1" class="${all ? "on" : ""}">Everything</button>`
+        + CATS.map(c => `<button data-cat="${c.id}" class="${
+            !all && cats.includes(c.id) ? "on" : ""}" ${all ? "disabled" : ""}>${esc(c.name)}</button>`).join("");
+      $("glEx").innerHTML = all ? "" : live.map(e => `<button data-ex="${e.id}" class="${
+        exIds.includes(e.id) || cats.includes(e.cat) ? "on " : ""}${
+        metric === "dist" && !(e.kmh > 0) && !e.gps ? "nod" : ""}" ${
+        cats.includes(e.cat) ? "disabled" : ""}>${esc(e.name)}</button>`).join("");
+      const ids = goalExIds({ all, cats, exIds }, DB.exercises);
+      $("glCount").textContent = ids.length ? `· ${ids.length} selected` : "· none yet";
+      const noDist = metric === "dist" && ids.length
+        && !ids.some(id => { const e = exById(id); return e && (e.kmh > 0 || e.gps); });
+      $("glHint").innerHTML = `Applies from the week of ${esc(fromYmd(wk).toLocaleDateString(
+        undefined, { month: "short", day: "numeric" }))}. The tiers stack: silver is bronze plus
+        its own number, gold is silver plus its own.${
+        metric === "dist" ? ` Faded exercises have no distance to give — they need a speed
+          or GPS in ✎ before they can count toward a distance goal.` : ""}${
+        noDist ? ` <b style="color:var(--warn)">Nothing selected measures distance yet.</b>` : ""}`;
+      $("glCats").querySelectorAll("[data-cat]").forEach(b => b.onclick = () => {
+        const c = b.dataset.cat;
+        if (cats.includes(c)) cats = cats.filter(x => x !== c);
+        else { cats.push(c); exIds = exIds.filter(id => (exById(id) || {}).cat !== c); }
+        paint();
+      });
+      $("glCats").querySelector("[data-all]").onclick = () => { all = !all; paint(); };
+      $("glEx").querySelectorAll("[data-ex]").forEach(b => b.onclick = () => {
+        const id = b.dataset.ex;
+        exIds = exIds.includes(id) ? exIds.filter(x => x !== id) : exIds.concat([id]);
+        paint();
+      });
+    };
+    paint();
+    ["glT", "glS", "glG"].forEach(id => $(id).oninput = paint);
+    $("glMetric").onchange = () => { metric = $("glMetric").value; paint(); };
+    $("glCancel").onclick = closeSheet;
+    $("glSave").onclick = () => {
+      const name = $("glName").value.trim();
+      if (!name) { toast("Name it first", "err"); return; }
+      const proto = { metric, all, cats, exIds };
+      if (!goalExIds(proto, DB.exercises).length) { toast("Pick at least one exercise", "err"); return; }
+      const t = +$("glT").value || 0;
+      if (!(t > 0)) { toast("Bronze needs a number", "err"); return; }
+      const patch = Object.assign({ name, ic: $("glIc").value.trim() || "🎯" }, proto);
+      const nr = { from: wk, target: goalFromInput(patch, t),
+                   silver: goalFromInput(patch, +$("glS").value || 0),
+                   gold: goalFromInput(patch, +$("glG").value || 0) };
+      if (isNew) {
+        DB.goals.push(Object.assign({ id: uid("gl"), ord: DB.goals.length, arch: false, revs: [nr] }, patch));
+      } else {
+        Object.assign(g, patch);
+        // one revision per week: editing twice in a week replaces, it doesn't stack
+        g.revs = g.revs.filter(r => r.from !== wk).concat([nr]).sort((a, b) => a.from < b.from ? -1 : 1);
+      }
+      save(true); closeSheet(); renderAll(); toast(isNew ? "Goal created" : "Saved");
+    };
+    if (!isNew) $("glDel").onclick = () => {
+      snapshotForUndo("delete goal");
+      DB.goals = DB.goals.filter(x => x.id !== g.id);
+      save(true); closeSheet(); renderAll(); toast("Goal deleted");
+    };
+  });
 }
 
 // "Routine" = what you actually reach for. Most recently done first, then
@@ -3437,13 +3914,15 @@ function weekReviewHTML(mondayKey) {
   if (!rows.length) return `<div class="empty">Nothing logged that week.</div>`;
   return `
     <div class="streakrow">
-      <div class="stat"><div class="n">${minsOf(secs)}<small>/${goal}</small></div><div class="l">Minutes</div></div>
+      <div class="stat"><div class="n">${minsOf(secs)}${goal > 0 ? `<small>/${Math.round(goal)}</small>` : ""}</div><div class="l">Minutes</div></div>
       <div class="stat"><div class="n">${days}<small>/7</small></div><div class="l">Days</div></div>
       <div class="stat"><div class="n">${canEstimateKcal() ? Math.round(kcalOfLogs(rows)) : "—"}</div><div class="l">kcal</div></div>
     </div>
-    <div class="kv" style="margin-top:10px"><span>Weekly goal</span>
+    ${/* a week with no goal in force was never judged, and "hit" would be a lie */""}
+    ${goal > 0 ? `<div class="kv" style="margin-top:10px"><span>Weekly goal</span>
       <b style="color:${secs / 60 >= goal ? "var(--good)" : "var(--warn)"}">${
-        secs / 60 >= goal ? "hit 🏆" : `${Math.max(0, Math.ceil(goal - secs / 60))} min short`}</b></div>
+        secs / 60 >= goal ? "hit 🏆" : `${Math.max(0, Math.ceil(goal - secs / 60))} min short`}</b></div>`
+      : `<div class="kv" style="margin-top:10px"><span>Weekly goal</span><b>none that week</b></div>`}
     ${diff != null ? `<div class="kv"><span>vs the week before</span>
       <b style="color:${diff >= 0 ? "var(--good)" : "var(--warn)"}">${diff >= 0 ? "+" : ""}${diff}%</b></div>` : ""}
     <div class="kv"><span>Sessions</span><b>${rows.length}</b></div>
@@ -4239,9 +4718,30 @@ const SHEET_SCHEMA = {
       CUE_OPTS.filter(([k]) => cuesOf(e)[k]).map(([k]) => k).join(" ") || "",
       e.note || "", e.arch ? "yes" : ""])
   },
-  WeekGoals: {
-    cols: ["week_starting", "goal_minutes"],
-    rows: () => Object.keys(DB.weekGoals).sort().map(k => [k, DB.weekGoals[k]])
+  Goals: {
+    cols: ["id", "name", "metric", "selection", "week_from", "bronze", "silver", "gold", "archived"],
+    // one row per revision, so the sheet carries the same history the app does
+    rows: () => DB.goals.reduce((out, g) => out.concat((g.revs || []).map(r => {
+      const t = goalTiers(r) || { bronze: 0, silver: 0, gold: 0 };
+      return [g.id, g.name, GOAL_METRICS[g.metric].unit,
+        g.all ? "everything" : (g.cats || []).map(catName)
+          .concat((g.exIds || []).map(i => (exById(i) || {}).name).filter(Boolean)).join(" + "),
+        r.from, t.bronze, t.silver, t.gold, g.arch ? "yes" : ""];
+    })), [])
+  },
+  GoalWeeks: {
+    cols: ["week_starting", "goal", "metric", "achieved", "bronze", "silver", "gold", "medal"],
+    rows: () => {
+      const out = [], now = weekKeyOf(new Date());
+      DB.goals.forEach(g => goalWeekKeys(g).forEach(k => {
+        const t = goalTiers(goalRev(g, k)); if (!t) return;
+        const v = goalWeekVal(g, DB.exercises, DB.logs, k);
+        out.push([k, g.name, GOAL_METRICS[g.metric].unit, Math.round(v * 100) / 100,
+          t.bronze, t.silver, t.gold,
+          k === now ? "in progress" : (goalMedalOf(v, t) || "")]);
+      }));
+      return out.sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    }
   },
   Circuits: {
     cols: ["id", "name", "rest_seconds", "exercises"],
@@ -4255,7 +4755,7 @@ const SHEET_SCHEMA = {
       ["sex", DB.profile.sex], ["units", DB.settings.units],
       ["first_day", startDate()], ["desk_hours", DB.profile.deskHours],
       ["sleep_hours", DB.profile.sleepHours],
-      ["weekly_goal_minutes", DB.settings.weeklyGoalMin],
+      ["weekly_goal_minutes", Math.round(weekGoalMin(weekKeyOf(new Date())))],
       ["app_version", APP_VERSION], ["schema", SCHEMA_VERSION]
     ]
   }
@@ -4356,7 +4856,6 @@ function renderSettings() {
   const s = DB.settings, pr = DB.profile;
   $("setBeep").checked = s.beep; $("setVib").checked = s.vib;
   $("setWake").checked = s.wake;
-  $("setWeekly").value = s.weeklyGoalMin;
   $("setUnits").value = s.units;
   $("setBirth").value = pr.birth || "";
   $("setStart").value = startDate();
@@ -4417,7 +4916,9 @@ function renderSettings() {
   let sz = 0; try { sz = (localStorage.getItem(LSKEY) || "").length; } catch (e) {}
   $("aboutBox").innerHTML = `App v${APP_VERSION} · schema ${SCHEMA_VERSION}<br>
     ${DB.exercises.filter(e => !e.arch).length} exercises · ${DB.logs.length} sessions ·
-    ${Object.keys(DB.weekGoals || {}).length} week goal override${Object.keys(DB.weekGoals || {}).length === 1 ? "" : "s"}<br>
+    ${liveGoals().length} weekly goal${liveGoals().length === 1 ? "" : "s"} ·
+    ${DB.goals.reduce((n, g) => n + (g.revs || []).length, 0)} target revision${
+      DB.goals.reduce((n, g) => n + (g.revs || []).length, 0) === 1 ? "" : "s"}<br>
     ${(sz / 1024).toFixed(1)} KB stored · screen ${window.innerWidth}×${window.innerHeight} @ ${window.devicePixelRatio}x`;
 }
 
@@ -4508,7 +5009,7 @@ function showTab(t) {
   document.querySelectorAll(".tab").forEach(el => el.classList.toggle("active", el.id === "tab-" + t));
   $("nav").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
   $("hdrSettings").classList.toggle("active", t === "settings");
-  $("fab").classList.toggle("show", t === "ex");
+  $("fab").classList.toggle("show", t === "ex" || t === "goals");
   window.scrollTo(0, 0);
 }
 function boot() {
@@ -4517,7 +5018,8 @@ function boot() {
 
   $("nav").querySelectorAll("button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
-  $("fab").onclick = () => editExercise(null);
+  // the + means "one more of what this tab is about"
+  $("fab").onclick = () => (tab === "goals" ? editGoal(null) : editExercise(null));
   $("goExercises").onclick = () => showTab("ex");
   $("goReview").onclick = () => showTab("history");
   $("editToday").onclick = () => openDayEdit(todayStr());
@@ -4527,12 +5029,8 @@ function boot() {
   $("newChain").onclick = () => editRoutine(null);
   $("exSearch").oninput = e => { exQuery = e.target.value; renderExList(); };
 
-  $("wkVal").onclick = () => {
-    const wk = weekKeyOf(new Date());
-    askNumber("Weekly goal", "Minutes for the week of " + fromYmd(wk).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ` — ${fmtHM(weekGoalMin(wk))} today`, weekGoalMin(wk), v => {
-      setWeekGoal(wk, v); save(true); renderAll(); toast("Goal set for this week");
-    });
-  };
+  $("goalNew").onclick = () => editGoal(null);
+  $("setGoGoals").onclick = () => showTab("goals");
 
   $("prevMonth").onclick = () => { if (--calM < 0) { calM = 11; calY--; } renderCal(); };
   $("nextMonth").onclick = () => { if (++calM > 11) { calM = 0; calY++; } renderCal(); };
@@ -4580,11 +5078,6 @@ function boot() {
     }
     catch (e) { setSyncState("Failed — " + e.message, "err"); }
   };
-  $("setWeekly").onchange = e => {
-    DB.settings.weeklyGoalMin = Math.max(0, +e.target.value || 0);
-    save(true); renderAll();
-  };
-
   $("btnExport").onclick = () => {
     const blob = new Blob([JSON.stringify(DB, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
