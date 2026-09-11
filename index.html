@@ -69,16 +69,6 @@
   .strk3.broken .ic{filter:grayscale(1);opacity:.4;}
   .strk3 .cnt{font-size:24px;font-weight:800;margin-top:7px;line-height:1;}
   .strk3 .cnt small{font-size:11px;font-weight:600;color:var(--muted);}
-  /* three medal runs in the space one number used to have */
-  /* 57px is the ic+cnt stack the other two tiles make, so the labels below
-     still line up across all three */
-  .strk3 .mrun{display:flex;gap:2px;justify-content:center;align-items:center;min-height:57px;}
-  .strk3 .mq{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;}
-  /* a run at zero dims but is never greyed out — which medal is which is the
-     one thing this tile always has to say */
-  .strk3 .mq.off{opacity:.5;}
-  .strk3 .mq .mi{font-size:19px;line-height:1;}
-  .strk3 .mq .mn{font-size:16px;font-weight:800;line-height:1;}
   .strk3 .lbl{font-size:10px;color:var(--muted);margin-top:5px;line-height:1.2;}
   .strk3 .need{font-size:10px;font-weight:700;margin-top:5px;line-height:1.2;color:var(--accent2);}
   .strk3 .need.met{color:var(--good);}
@@ -133,6 +123,16 @@
     color:var(--muted);font-variant-numeric:tabular-nums;}
   .tlab b{font-weight:700;}
   .gsub{margin-top:6px;font-size:11.5px;color:var(--muted);}
+  /* the goal breakdown sheet: the same card, but nothing here is a button */
+  .gbsheet .gcard{cursor:default;margin-bottom:0;}
+  .gbrow{cursor:default;}
+  .gbrow:active{transform:none;}
+  /* each exercise's share of the week, so one dominant entry is obvious
+     without reading the percentages */
+  .gbrow .sb{height:4px;border-radius:3px;background:var(--bg2);margin-top:5px;overflow:hidden;}
+  .gbrow .sb i{display:block;height:100%;border-radius:3px;background:var(--catc);}
+  .gbrow .v{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:14px;}
+  .gbrow .v small{font-size:10px;font-weight:600;color:var(--muted);}
   /* medal tally: one column per goal, one row per tier */
   .mtal{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .mtal .mc{padding:10px 8px;border-radius:13px;
@@ -554,7 +554,10 @@
         <div class="stat"><div class="n" id="tdWeek">0</div><div class="l">Min this week</div></div>
         <div class="stat"><div class="n" id="tdKcal">0</div><div class="l" id="tdKcalLab">kcal burned</div></div>
       </div>
-      <div id="todayList" style="margin-top:6px"></div>
+      <!-- the list itself lives in the day modal: on a phone it pushed the
+           routine grid, and with it the button that starts a session, off the
+           bottom of the screen on any decent day -->
+      <button class="btn sec" id="todayShow" style="margin-top:12px"></button>
     </div>
 
     <!-- straight under Today: what you just did, then what you could do next -->
@@ -886,7 +889,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "22";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "23";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -1838,6 +1841,17 @@ function medalStreak(tier) {
 }
 // the old weekly-goal streak is the bronze run: every goal met, whatever the tier
 const weekStreak = () => medalStreak("bronze");
+/* The strongest run currently going, since the weaker ones are implied — three
+   weeks of silver is three weeks of bronze as well, and showing both numbers
+   said the same thing twice. Nothing running falls back to bronze at zero,
+   which reads as the run you have yet to start rather than as a blank. */
+function topMedalStreak() {
+  for (const m of MEDALS) {                       // gold first
+    const r = medalStreak(m.k);
+    if (r.cur > 0) return { tier: m.k, ...r };
+  }
+  return { tier: "bronze", ...medalStreak("bronze") };
+}
 const streakInfo = kind => kind === "week" ? weekStreak() : dayStreak(kind);
 // What it takes to keep this streak alive today.
 function streakNeed(kind) {
@@ -1923,7 +1937,8 @@ const goalGap = (g, v) => goalFmt(g, g.metric === "dist"
    min 36 s against a 3-minute tier has to read "2 / 3", not a "3 / 3" that looks
    met while the line under it still asks for "+1 min". Distances already carry
    two decimals, so only whole minutes can collide like that. */
-const goalNow = (g, v) => g.metric === "dist" ? goalToInput(g, v) : Math.floor(v);
+const goalFloor = (g, v) => g.metric === "dist" ? v : Math.floor(v);
+const goalNow = (g, v) => goalToInput(g, goalFloor(g, v));
 const goalUnit = g => g.metric === "dist" ? dUnit() : "min";
 // what the editor's number fields speak, so an imperial user types miles
 const goalToInput = (g, v) => g.metric === "dist" ? Math.round(toDisplayD(v) * 100) / 100 : Math.round(v);
@@ -2531,6 +2546,30 @@ function goalWeekVal(g, exercises, rows, wk) {
   const m = EX_METRICS[g.metric === "dist" ? "dist" : "time"];
   return rows.reduce((s, l) => s + (ids.has(l.exId) && l.date >= wk && l.date <= end
     ? m.of(l, byId[l.exId] || {}) : 0), 0);
+}
+/* Where that total actually came from. A bar can only say how far along you
+   are; the first question it provokes is "from what?", so this splits the week
+   by exercise. Eligible exercises that contributed nothing are kept apart
+   rather than dropped — those are the ones still available to close the gap. */
+function goalWeekBreakdown(g, exercises, rows, wk) {
+  const byId = Object.fromEntries(exercises.map(e => [e.id, e]));
+  const end = ymd(addDays(fromYmd(wk), 6));
+  const m = EX_METRICS[g.metric === "dist" ? "dist" : "time"];
+  const acc = {};
+  goalExIds(g, exercises).forEach(id => {
+    const e = byId[id] || {};
+    acc[id] = { id, name: e.name || "?", art: e.art, cat: e.cat, val: 0, n: 0, secs: 0, days: {} };
+  });
+  rows.forEach(l => {
+    const a = acc[l.exId];
+    if (!a || l.date < wk || l.date > end) return;
+    a.val += m.of(l, byId[l.exId] || {});
+    a.n++; a.secs += l.secs; a.days[l.date] = 1;
+  });
+  const all = Object.values(acc).map(a => ({ ...a, days: Object.keys(a.days).length }));
+  return { total: all.reduce((s, a) => s + a.val, 0),
+           did: all.filter(a => a.val > 0).sort((a, b) => b.val - a.val),
+           idle: all.filter(a => !(a.val > 0)).sort((a, b) => a.name.localeCompare(b.name)) };
 }
 /* Minutes this goal asks of the week, which is what the month and year bars
    pace against. A distance goal converts at the average speed of the
@@ -3160,10 +3199,11 @@ function renderToday() {
     $("tdKcalLab").textContent = "Hours this month";     // no weight yet → no calorie estimate
   }
 
-  $("todayList").innerHTML = mine.length
-    ? mine.slice().sort((a, b) => b.ts - a.ts).map(logRow).join("")
-    : "";
-  bindLogLines($("todayList"));
+  // one button instead of the list; the list itself moved into a sheet
+  $("todayShow").textContent = mine.length
+    ? `Show ${mine.length} session${mine.length === 1 ? "" : "s"} ›`
+    : "Nothing logged yet today ›";
+  $("todayShow").onclick = openTodayList;
 
   renderStreaks();
   renderWeekGoal();
@@ -3183,6 +3223,26 @@ function logLine(l) {
     <div class="r">${mmss(l.secs)}</div>
     <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button>
   </div>`;
+}
+/* Today's sessions, behind a button rather than laid out on the card: a good
+   day ran to seven rows and pushed the routine grid — and with it the button
+   that starts the next session — off the bottom of the phone. The rows are the
+   same ones, so nothing is lost but the scrolling. */
+function openTodayList() {
+  const rows = logsOn(todayStr()).slice().sort((a, b) => b.ts - a.ts);
+  openSheet(`<h3>Today's sessions</h3>
+    ${rows.length ? `<div class="hint" style="margin:-4px 0 2px">${minsOf(sumSecs(rows))} minutes · ${
+        rows.length} session${rows.length === 1 ? "" : "s"}${
+        canEstimateKcal() ? ` · ${Math.round(kcalOfLogs(rows))} kcal` : ""}
+        · tap one to edit it</div>${rows.map(logRow).join("")}`
+      : `<div class="empty">Nothing logged yet today.</div>`}
+    <div class="btnrow" style="margin-top:16px">
+      <button class="btn sec" id="tlEdit">✎ Enter minutes</button>
+      <button class="btn" id="tlOk">Close</button></div>`, () => {
+    bindLogLines($("sheetBody"));
+    $("tlEdit").onclick = () => { closeSheet(); openDayEdit(todayStr()); };
+    $("tlOk").onclick = closeSheet;
+  });
 }
 // Today's sessions as a vertical list. Deliberately opens the SESSION editor,
 // not the exercise page — from here you are reviewing what you already did, not
@@ -3373,29 +3433,20 @@ function openDayEdit(k) {
 function renderStreaks() {
   const box = $("streaksBox");
   box.innerHTML = `<div class="streaks3">${STREAK_DEFS.map(o => {
-    const s = streakInfo(o.k), need = streakNeed(o.k);
+    /* The medal tile wears the strongest run it's in rather than a fixed icon:
+       a silver week is a bronze week too, so a silver medal already implies the
+       bronze run underneath it. Which weeks were which is one tap away. */
+    const s = o.k === "week" ? topMedalStreak() : streakInfo(o.k), need = streakNeed(o.k);
+    const ic = o.k === "week" ? MEDAL[s.tier].ic : o.ic;
     const broken = s.cur === 0 && !need.ok;
     const lastTxt = s.last ? fromYmd(s.last).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "—";
     const needTxt = need.ok ? (need.txt || "✓ safe today") : (need.risk ? "⚠ " : "") + need.txt;
-    /* The medal tile carries three runs instead of one big number: the same
-       week can be a 12-week bronze run and a 1-week gold one, and only seeing
-       all three tells you which way the month is going. */
-    const head = o.k !== "week" ? `<div class="ic">${o.ic}</div>
-      <div class="cnt">${s.cur}<small> ${o.unit}</small></div>`
-      : `<div class="mrun">${MEDAL_ASC.map(m => {
-          const r = medalStreak(m.k), can = weekCanTier(weekKeyOf(new Date()), m.k);
-          return `<div class="mq${r.cur ? "" : " off"}" title="${esc(m.lbl)}: ${
-            can ? r.cur + " week" + (r.cur === 1 ? "" : "s") + " running, best " + r.best
-                : "no " + m.k + " target set"}">
-            <span class="mi">${m.ic}</span><span class="mn">${can ? r.cur : "–"}</span></div>`;
-        }).join("")}</div>`;
     return `<div class="strk3 ${broken ? "broken" : ""} ${need.risk ? "risk" : ""}" data-streak="${o.k}">
-      ${head}
+      <div class="ic">${ic}</div>
+      <div class="cnt">${s.cur}<small> ${o.unit}</small></div>
       <div class="lbl">${o.lbl}</div>
       <div class="need${need.ok ? " met" : ""}">${needTxt}</div>
-      ${/* on the medal tile 'best' has to say which run it's the best of, since
-           three are on show — it's the bronze one, i.e. any medal at all */""}
-      <div class="last">${o.k === "week" ? MEDAL.bronze.ic + " " : ""}best ${s.best} · last ${lastTxt}</div>
+      <div class="last">best ${s.best} · last ${lastTxt}</div>
     </div>`;
   }).join("")}</div>`;
   box.querySelectorAll("[data-streak]").forEach(el => el.onclick = () => {
@@ -3449,13 +3500,60 @@ function goalCard(st, compact) {
         `<${val >= tiers[k] ? "b" : "span"}>${MEDAL[k].ic} ${goalToInput(g, tiers[k])}</${
           val >= tiers[k] ? "b" : "span"}>`).join(" ")} ${esc(goalUnit(g))}</span>
     </div>`}
+    ${/* the sub-line reads the same floored total the head does: "6 / 5 min"
+         over "7 min in" is two different numbers for one week */""}
     ${compact ? "" : `<div class="gsub">${
-      !nextK ? `${MEDAL[medal].lbl}. Nothing left to prove this week — ${goalFmt(g, val)} in.`
+      !nextK ? `${MEDAL[medal].lbl}. Nothing left to prove this week — ${
+        goalFmt(g, goalFloor(g, val))} in.`
       : `${goalGap(g, left)} to ${nextK}` +
         `, about ${goalGap(g, left / daysLeft)} a day for the ${daysLeft} day${daysLeft === 1 ? "" : "s"} left` +
         `${!medal && val < onPace ? " · behind pace" : ""}`
     } · ${st.n} exercise${st.n === 1 ? "" : "s"}</div>`}
   </div>`;
+}
+
+/* Tapping a goal on Today asks "what did I do towards this?" — not "let me
+   move the target". The editor is one tab away on Goals, which is where you go
+   when you mean to change something; reaching it by accident from a progress
+   bar is how a target gets raised by mistake and a week quietly un-earns its
+   medal. So Today summarises, and offers the editor as a deliberate second tap. */
+function openGoalBreak(st) {
+  const { g, tiers } = st;
+  const bd = goalWeekBreakdown(g, DB.exercises, DB.logs, st.wk);
+  const share = a => bd.total > 0 ? Math.round(a.val / bd.total * 100) : 0;
+  const md = d => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const line = a => `<div class="logrow gbrow" style="--catc:${catColor(a.cat)}">
+    <div class="a">${art(a.art)}</div>
+    <div class="b">
+      <div class="n">${esc(a.name)}</div>
+      <div class="s">${a.n} session${a.n === 1 ? "" : "s"} · ${a.days} day${a.days === 1 ? "" : "s"}${
+        /* a distance goal is the one place the clock isn't the headline, so it
+           moves into the small print rather than disappearing */
+        g.metric === "dist" && a.secs ? ` · ${mmss(a.secs)}` : ""}</div>
+      <div class="sb"><i style="width:${share(a)}%"></i></div>
+    </div>
+    <div class="v">${goalFmt(g, a.val)}<small>${share(a)}%</small></div>
+  </div>`;
+  openSheet(`<h3>${g.ic || "🎯"} ${esc(g.name)}</h3>
+    ${/* the card under this already carries the total against the tier, so the
+         line above it dates the week and stops there */""}
+    <div class="hint" style="margin:-4px 0 10px">${md(fromYmd(st.wk))} – ${
+      md(addDays(fromYmd(st.wk), 6))}${tiers ? "" : " · no target"}</div>
+    <div class="gbsheet">${goalCard(st, false)}</div>
+    ${bd.did.length
+      ? `<div class="hint" style="margin:14px 0 2px">Where it came from</div>${bd.did.map(line).join("")}`
+      : `<div class="empty" style="margin-top:14px">Nothing towards this one yet this week.</div>`}
+    ${bd.idle.length && bd.idle.length <= 8
+      ? `<div class="hint" style="margin-top:10px">Also counts: ${
+          bd.idle.map(a => esc(a.name)).join(", ")}.</div>`
+      : bd.idle.length ? `<div class="hint" style="margin-top:10px">${bd.idle.length} other
+          exercise${bd.idle.length === 1 ? "" : "s"} in this goal went untouched.</div>` : ""}
+    <div class="btnrow" style="margin-top:16px">
+      <button class="btn sec" id="gbEdit">Edit goal</button>
+      <button class="btn" id="gbOk">Close</button></div>`, () => {
+    $("gbEdit").onclick = () => { closeSheet(); editGoal(g); };
+    $("gbOk").onclick = closeSheet;
+  });
 }
 
 function renderWeekGoal() {
@@ -3475,8 +3573,9 @@ function renderWeekGoal() {
       <span class="val edit" id="wkVal">${done}/${sts.length} met ›</span></div>
     ${sts.map(s => goalCard(s, true)).join("")}`;
   $("wkVal").onclick = () => showTab("goals");
+  // Today summarises; the Goals tab edits. See openGoalBreak.
   box.querySelectorAll("[data-goal]").forEach(el =>
-    el.onclick = () => editGoal(DB.goals.find(g => g.id === el.dataset.goal)));
+    el.onclick = () => { const s = sts.find(x => x.g.id === el.dataset.goal); if (s) openGoalBreak(s); });
 }
 
 function renderGoals() {
