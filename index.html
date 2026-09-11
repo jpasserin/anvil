@@ -123,6 +123,15 @@
     color:var(--muted);font-variant-numeric:tabular-nums;}
   .tlab b{font-weight:700;}
   .gsub{margin-top:6px;font-size:11.5px;color:var(--muted);}
+  /* this goal's three runs, in the tile's own idiom but all three at once:
+     here there is room for them, and which tier you're holding is the point */
+  .grun{display:flex;gap:7px;}
+  .grun .rq{flex:1;padding:8px 4px;border-radius:12px;text-align:center;
+    background:var(--card2);border:1px solid var(--line);}
+  .grun .rq.off{opacity:.5;}
+  .grun .ri{font-size:16px;line-height:1;}
+  .grun b{display:block;font-size:19px;font-weight:800;line-height:1.1;margin-top:3px;}
+  .grun small{display:block;font-size:9.5px;color:var(--muted);margin-top:2px;}
   /* the goal breakdown sheet: the same card, but nothing here is a button */
   .gbsheet .gcard{cursor:default;margin-bottom:0;}
   .gbrow{cursor:default;}
@@ -889,7 +898,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "23";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "24";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2594,6 +2603,27 @@ function goalWeekKeys(g) {
   for (let d = weekStart(new Date()); ymd(d) >= first && out.length < 520; d = addDays(d, -7)) out.unshift(ymd(d));
   return out;
 }
+/* The same three runs the streak tile counts, but for one goal on its own —
+   the week tile can only ever report the weakest link, so "I've held silver on
+   the rope for nine weeks" is invisible there while one stubborn goal keeps the
+   whole week at bronze. All three tiers come back from a single pass, since the
+   per-week totals are the expensive part and a gold week extends every run.
+   The week in progress is graced exactly as it is on the tile: it counts the
+   moment it's won and never breaks a run before Sunday. */
+function goalMedalRuns(g, exercises, rows) {
+  const ranks = goalWeekKeys(g).map(k => medalRank(
+    goalMedalOf(goalWeekVal(g, exercises, rows, k), goalTiers(goalRev(g, k)))));
+  const last = ranks.length - 1;
+  const tail = (need, from) => { let c = 0; for (let i = from; i >= 0 && ranks[i] >= need; i--) c++; return c; };
+  const out = {};
+  for (const m of MEDALS) {
+    const need = MEDAL_RANK[m.k];
+    let best = 0, run = 0;
+    for (const r of ranks) { if (r >= need) { if (++run > best) best = run; } else run = 0; }
+    out[m.k] = { cur: last < 0 ? 0 : tail(need, ranks[last] >= need ? last : last - 1), best };
+  }
+  return out;
+}
 /* The week's medal is the *weakest* one its goals earned: gold means every goal
    went gold, and a single goal left at bronze caps the whole week at bronze. One
    goal missed outright and the week has no medal at all — which is the same test
@@ -3520,6 +3550,7 @@ function goalCard(st, compact) {
 function openGoalBreak(st) {
   const { g, tiers } = st;
   const bd = goalWeekBreakdown(g, DB.exercises, DB.logs, st.wk);
+  const runs = goalMedalRuns(g, DB.exercises, DB.logs);
   const share = a => bd.total > 0 ? Math.round(a.val / bd.total * 100) : 0;
   const md = d => d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   const line = a => `<div class="logrow gbrow" style="--catc:${catColor(a.cat)}">
@@ -3540,6 +3571,18 @@ function openGoalBreak(st) {
     <div class="hint" style="margin:-4px 0 10px">${md(fromYmd(st.wk))} – ${
       md(addDays(fromYmd(st.wk), 6))}${tiers ? "" : " · no target"}</div>
     <div class="gbsheet">${goalCard(st, false)}</div>
+    ${/* how long this one goal has held each tier — the streak tile can only
+         report the weakest link, so a long silver run on one goal is invisible
+         there whenever another goal is sitting at bronze */""}
+    ${tiers ? `<div class="hint" style="margin:14px 0 6px">Weeks in a row</div>
+      <div class="grun">${MEDAL_ASC.map(m => {
+        const r = runs[m.k], can = goalHasTier(tiers, m.k);
+        return `<div class="rq${can && r.cur ? "" : " off"}">
+          <span class="ri">${m.ic}</span><b>${can ? r.cur : "–"}</b>
+          <small>${can ? "best " + r.best : "no target"}</small></div>`;
+      }).join("")}</div>
+      <div class="hint" style="margin:6px 0 0">This week counts the moment it's
+        won, and won't break a run before Sunday.</div>` : ""}
     ${bd.did.length
       ? `<div class="hint" style="margin:14px 0 2px">Where it came from</div>${bd.did.map(line).join("")}`
       : `<div class="empty" style="margin-top:14px">Nothing towards this one yet this week.</div>`}
