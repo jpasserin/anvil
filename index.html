@@ -142,6 +142,29 @@
   .gbrow .sb i{display:block;height:100%;border-radius:3px;background:var(--catc);}
   .gbrow .v{display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:14px;}
   .gbrow .v small{font-size:10px;font-weight:600;color:var(--muted);}
+  /* the medal celebration: the one screen in the app that isn't a report, so it
+     gets the only animation — a medal that lands, and pips that fall past it */
+  .cheer{position:relative;text-align:center;overflow:hidden;padding:6px 0 2px;}
+  .cheer h3{margin:2px 0 2px;}
+  .cmed{font-size:64px;line-height:1;animation:cpop .5s cubic-bezier(.2,1.5,.4,1) both;}
+  @keyframes cpop{from{transform:scale(.2) rotate(-25deg);opacity:0}to{transform:none;opacity:1}}
+  .cconf{position:absolute;inset:0;pointer-events:none;}
+  .cconf i{position:absolute;top:-10px;width:6px;height:10px;border-radius:2px;
+    opacity:0;animation:cfall 1.5s linear both;}
+  @keyframes cfall{
+    10%{opacity:1}
+    to{transform:translateY(150px) rotate(540deg);opacity:0}}
+  /* one line per goal that moved up, tinted with the tier it reached */
+  .chline{display:flex;gap:10px;align-items:flex-start;margin-top:10px;padding:10px 12px;
+    background:var(--card2);border:1px solid var(--line);border-left:3px solid var(--tint);
+    border-radius:var(--r);}
+  .chline .ci{font-size:22px;line-height:1.1;}
+  .chline .cb{min-width:0;flex:1;}
+  .chline .cn{font-weight:700;font-size:14px;}
+  .chline .cs{font-size:11.5px;color:var(--muted);margin-top:2px;}
+  @media (prefers-reduced-motion:reduce){
+    .cmed,.cconf i{animation:none;}
+    .cconf{display:none;}}
   /* medal tally: one column per goal, one row per tier */
   .mtal{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
   .mtal .mc{padding:10px 8px;border-radius:13px;
@@ -357,6 +380,10 @@
   /* above .fpage (55) — sheets are opened FROM the exercise page, so they must
      sit on top of it, not behind */
   .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;justify-content:center;z-index:60;}
+  /* the toast sits at 90 so it can be seen over the runner, which means a plain
+     "Logged" confirmation would otherwise land across the medal popup and cover
+     the line naming the goal. The medal is the better message, so it goes above. */
+  .modal.top{z-index:95;}
   .modal.show{display:flex;}
   .modal .sheet{background:var(--card);border:1px solid var(--line);border-radius:20px 20px 0 0;
     width:100%;max-width:560px;padding:22px 18px calc(22px + env(safe-area-inset-bottom));
@@ -898,7 +925,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "24";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "25";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2650,6 +2677,30 @@ function goalsWeekCanTier(goals, exercises, wk, k) {
   const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
   return live.length > 0 && live.every(g => goalHasTier(goalTiers(goalRev(g, wk)), k));
 }
+/* What each goal is holding this week, as a rank per goal id. Taken before a
+   logging edit and again after, this is the whole basis for knowing a medal was
+   just won — nothing is stored, so a reload, an import or a deleted session
+   re-derives the truth instead of remembering a celebration that no longer
+   matches the data. */
+function goalMedalSnapshot(goals, exercises, rows, wk) {
+  const out = {};
+  goals.filter(g => !g.arch).forEach(g => {
+    out[g.id] = medalRank(goalMedalOf(goalWeekVal(g, exercises, rows, wk),
+                                      goalTiers(goalRev(g, wk))));
+  });
+  return out;
+}
+/* Only a rank that went up, and only for a goal that existed on both sides.
+   Deleting a session can drop a rank, archiving a goal can make one vanish and
+   lowering a target can hand one over without any work being done — none of
+   those is something to throw confetti at. Highest new tier first, since that's
+   the one the popup wears. */
+function medalUpgrades(before, after) {
+  return Object.keys(after)
+    .filter(id => before[id] != null && after[id] > before[id])
+    .map(id => ({ id, from: before[id], to: after[id] }))
+    .sort((a, b) => b.to - a.to);
+}
 /*</pure>*/
 
 /* =====================================================================
@@ -2899,6 +2950,7 @@ function stopRun(toToday) {
      its purpose. Bailing out (✕ End) still returns you to where you were. */
   if (toToday) { closeExercise(); showTab("today"); }
   else if (exViewId) openExercise(exViewId);              // refresh the page underneath
+  flushCheer();      // a medal won mid-queue waited for the session to be over
 }
 function endRun() {
   const secs = Math.round(elapsedNow());
@@ -3147,6 +3199,7 @@ function logEntry(exId, secs, when, km) {
   const ex = exById(exId);
   if (!ex) return;
   const d = when ? new Date(when) : new Date();
+  const before = cheerBefore();
   DB.logs.push({
     id: uid("lg"), exId, name: ex.name, cat: ex.cat, art: ex.art,
     date: ymd(d), ts: d.getTime(), secs: Math.round(secs),
@@ -3156,6 +3209,7 @@ function logEntry(exId, secs, when, km) {
     km: km > 0 ? Math.round(km * 1000) / 1000 : 0
   });
   save();
+  cheerAfter(before);
 }
 /*<pure:logs>*/
 const logsOn = date => DB.logs.filter(l => l.date === date);
@@ -3247,9 +3301,12 @@ const calMNow = () => new Date().getMonth();
 
 function logLine(l) {
   const time = new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  // a measured distance goes on the line: on a walk it is the session, and
+  // scrolling back through a month of them for it was the whole complaint
+  const sub = l.km > 0 ? `${time} · ${fmtDist(l.km)} · ${fmtSpeedU(l.km, l.secs)}` : time;
   return `<div class="exrow" data-openex="${l.exId}">
     <span class="dot" style="background:${catColor(l.cat)}"></span>
-    <div style="flex:1;min-width:0"><div class="t">${esc(l.name)}</div><div class="s">${time}</div></div>
+    <div style="flex:1;min-width:0"><div class="t">${esc(l.name)}</div><div class="s">${sub}</div></div>
     <div class="r">${mmss(l.secs)}</div>
     <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button>
   </div>`;
@@ -3326,8 +3383,15 @@ function editLog(id) {
     <div class="kv" style="margin-top:10px"><span>Category</span><b>${esc(catName(l.cat))}</b></div>
     <div class="kv"><span>Intensity</span><b>MET ${metOfLog(l).toFixed(1)}</b></div>
     ${l.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${l.rate}/min</b></div>` : ""}
-    ${l.km > 0 ? `<div class="kv"><span>Distance measured</span><b>${fmtDist(l.km)} · ${
-      fmtSpeedU(l.km, l.secs)}</b></div>` : ""}
+    ${/* A walk without a fix log used to show nothing here at all, which reads as
+         "this session has no distance" when in fact every goal and milestone is
+         already counting it at the exercise's nominal speed. So say which number
+         is doing the counting, and label it, rather than leaving the row out. */""}
+    ${l.km > 0 ? `<div class="kv"><span>Distance measured</span><b>${fmtDist(l.km)}</b></div>
+      <div class="kv"><span>Average speed</span><b>${fmtSpeedU(l.km, l.secs)}</b></div>`
+    : (exById(l.exId) || {}).kmh > 0 ? `<div class="kv"><span>Distance (estimated)</span><b>${
+        fmtDist((exById(l.exId).kmh) * (l.secs / 3600))}</b></div>
+      <div class="kv"><span>Speed</span><b>${fmtSpeedU(exById(l.exId).kmh, 3600)} nominal</b></div>` : ""}
     ${canEstimateKcal() ? `<div class="kv"><span>Estimated burn</span><b>${Math.round(kcalOfLog(l))} kcal</b></div>` : ""}
     ${volumeKgOf(l) > 0 ? `<div class="kv"><span>Volume</span><b>${Math.round(volumeKgOf(l))} kg${
       repsAreEstimated(l) ? " (est.)" : ""}</b></div>` : ""}
@@ -3342,10 +3406,15 @@ function editLog(id) {
     <div class="field"><label for="elLoad">Load (${wUnit()}) — what you actually lifted this session</label>
       <input type="number" id="elLoad" min="0" step="0.5" inputmode="decimal"
         value="${l.load > 0 ? Math.round(toDisplayW(l.load) * 10) / 10 : ""}"></div>
-    ${l.km > 0 || (exById(l.exId) || {}).gps ? `<div class="field">
+    ${/* Any exercise measured in distance gets the field, not just one with GPS
+         switched on — turning GPS off (because the watch was losing legs) used to
+         take the distance away from the editor too, which left a walk with no way
+         to type in what you actually covered. */""}
+    ${l.km > 0 || exMetricKey(exById(l.exId)) === "dist" ? `<div class="field">
       <label for="elKm">Distance (${dUnit()}) — GPS is not infallible; blank clears it</label>
       <input type="number" id="elKm" min="0" step="0.01" inputmode="decimal"
-        value="${l.km > 0 ? Math.round(toDisplayD(l.km) * 100) / 100 : ""}"></div>` : ""}
+        value="${l.km > 0 ? Math.round(toDisplayD(l.km) * 100) / 100 : ""}">
+      <div class="hint" id="elSpd" style="margin:5px 0 0"></div></div>` : ""}
     ${exById(l.exId) ? `<div class="field toggle">
       <span class="small">Also make this the default for ${esc((exById(l.exId) || {}).name || "")}</span>
       <label class="switch"><input type="checkbox" id="elDefault"><span class="sl"></span></label></div>` : ""}
@@ -3357,9 +3426,27 @@ function editLog(id) {
     </div>
     <button class="btn danger" id="elDel" style="margin-top:8px">Delete this session</button>`, () => {
     $("elCancel").onclick = closeSheet;
+    /* Speed is the number that tells you whether a distance is believable, and it
+       has to move while you type: a fat-fingered 12 km walk should read as a jog
+       before you press Save, not after. Blank says what the estimate will be
+       instead, so clearing a bad fix isn't a leap in the dark. */
+    if ($("elKm")) {
+      const ex = exById(l.exId) || {};
+      const spd = () => {
+        const km = fromDisplayD(+$("elKm").value || 0);
+        const secs = (+$("elMin").value || 0) * 60 + (+$("elSec").value || 0);
+        $("elSpd").textContent = km > 0 && secs > 0
+          ? `${fmtSpeedU(km, secs)} average${ex.kmh > 0 ? ` · usually ${fmtSpeedU(ex.kmh, 3600)}` : ""}`
+          : ex.kmh > 0 ? `Blank counts as ${fmtDist(ex.kmh * (secs / 3600))} at ${
+              fmtSpeedU(ex.kmh, 3600)}` : "Blank means no distance for this session.";
+      };
+      spd();
+      ["elKm", "elMin", "elSec"].forEach(id => $(id).oninput = spd);
+    }
     $("elSave").onclick = () => {
       const secs = (+$("elMin").value || 0) * 60 + (+$("elSec").value || 0);
       if (secs < 1) { toast("Duration has to be more than zero", "err"); return; }
+      const before = cheerBefore();
       l.secs = secs;
       l.load = Math.max(0, fromDisplayW(+$("elLoad").value || 0));
       l.reps = Math.max(0, +$("elReps").value || 0);
@@ -3371,6 +3458,7 @@ function editLog(id) {
       moveLogToDate(l, $("elDate").value);
       save(true); closeSheet(); refreshAfterLogChange();
       toast(ex && $("elDefault") && $("elDefault").checked ? `Saved · ${esc(ex.name)} now defaults to ${fmtW(l.load)}` : "Saved");
+      cheerAfter(before);
     };
     $("elDel").onclick = () => {
       deleteLog(l.id); closeSheet(); refreshAfterLogChange();
@@ -3449,6 +3537,7 @@ function openDayEdit(k) {
     $("deSave").onclick = () => {
       harvest();
       snapshotForUndo("edit day");
+      const before = cheerBefore();
       const res = applyDayEdit(k, rows, uid);
       save(true); closeSheet(); refreshAfterLogChange();
       const bits = [];
@@ -3456,6 +3545,8 @@ function openDayEdit(k) {
       if (res.merged) bits.push(`${res.merged} merged`);
       if (res.cleared) bits.push(`${res.cleared} cleared`);
       if (bits.length) offerUndo(bits.join(" · ")); else toast("No changes");
+      // last, so the Undo offer is already up: flushCheer waits behind it
+      cheerAfter(before);
     };
   });
 }
@@ -3596,6 +3687,90 @@ function openGoalBreak(st) {
       <button class="btn" id="gbOk">Close</button></div>`, () => {
     $("gbEdit").onclick = () => { closeSheet(); editGoal(g); };
     $("gbOk").onclick = closeSheet;
+  });
+}
+
+/* ---------- celebrating a medal ----------
+   Time reaches the log through five different doors — the runner's confirm
+   screen, ending a run early, the manual entry, the whole-day form and the
+   session editor — and any of them can be the tap that wins a medal. So none of
+   them knows anything about medals: each one snapshots what the goals were
+   holding, does its edit, and compares. `medalUpgrades` decides whether that was
+   a win, which means the celebration can't fire twice for the same tier and
+   can't fire at all for a target you simply lowered. */
+let cheerWon = [];
+const cheerBefore = () => goalMedalSnapshot(DB.goals, DB.exercises, DB.logs, weekKeyOf(new Date()));
+function cheerAfter(before) {
+  if (!before) return;
+  medalUpgrades(before, goalMedalSnapshot(DB.goals, DB.exercises, DB.logs, weekKeyOf(new Date())))
+    .forEach(u => cheerWon.push(u));
+  flushCheer();
+}
+/* Held back while the runner is up or a sheet is still open: interrupting set
+   three of five to congratulate you isn't a celebration, it's an interruption,
+   and a popup that lands on top of the form you just saved eats the tap. Both
+   `stopRun` and `closeSheet` call this again once the way is clear, so the
+   confetti arrives late rather than never. */
+function flushCheer() {
+  if (!cheerWon.length || RUN.active || $("sheetModal").classList.contains("show")) return;
+  /* And behind an Undo offer, which is the one toast you have to be able to
+     reach: covering it with a popup would turn "12 sessions merged" into an
+     irreversible edit. It clears itself, so this only ever waits a few seconds. */
+  if ($("toast").classList.contains("act")) { setTimeout(flushCheer, 800); return; }
+  const won = cheerWon; cheerWon = [];
+  openCheer(won);
+}
+function openCheer(won) {
+  const wk = weekKeyOf(new Date());
+  const rank = Math.max(...won.map(u => u.to));
+  const top = MEDALS.find(m => MEDAL_RANK[m.k] === rank);
+  const lines = won.map(u => {
+    const g = DB.goals.find(x => x.id === u.id);
+    if (!g) return "";
+    const st = goalState(g, wk), m = MEDALS.find(x => MEDAL_RANK[x.k] === u.to);
+    // the run this week just extended, which is the part a bare medal can't say
+    const run = goalMedalRuns(g, DB.exercises, DB.logs)[m.k].cur;
+    const tierKs = MEDAL_ASC.filter(x => goalHasTier(st.tiers, x.k)).map(x => x.k);
+    const nextK = tierKs.find(k => st.val < st.tiers[k]);
+    return `<div class="chline" style="--tint:${m.color}">
+      <span class="ci">${m.ic}</span>
+      <div class="cb">
+        <div class="cn">${esc(g.name)} — ${m.lbl}</div>
+        <div class="cs">${goalFmt(g, goalFloor(g, st.val))} of ${goalToInput(g, st.tiers[m.k])} ${
+          esc(goalUnit(g))}${run > 1 ? ` · ${run} weeks in a row` : ""}</div>
+        ${nextK ? `<div class="cs">${goalGap(g, st.tiers[nextK] - st.val)} more for ${nextK}.</div>`
+                : `<div class="cs">Nothing left to prove on this one.</div>`}
+      </div></div>`;
+  }).join("");
+  /* And the week's own medal, but only when it moved as well. The week is the
+     weakest of its goals, so gold on one of four says nothing about it, and
+     repeating a bronze you were already holding would flatten the news. When
+     every live goal is in this batch both sides of that minimum are known
+     exactly, which is the only case where the claim can be made honestly. */
+  const weekM = goalsWeekMedal(DB.goals, DB.exercises, DB.logs, wk);
+  const allIn = won.length === liveGoals().length;
+  const weekLine = allIn && weekM && MEDAL_RANK[weekM] > Math.min(...won.map(u => u.from))
+    ? `<div class="hint" style="margin-top:12px">Every goal is met — the whole week is
+       ${MEDAL[weekM].ic} ${MEDAL[weekM].lbl.toLowerCase()} as it stands.</div>` : "";
+  openSheet(`<div class="cheer">
+      ${/* twelve pips on fixed offsets rather than random ones, so the burst
+           looks the same every time and there is nothing to reproduce */""}
+      <div class="cconf">${Array.from({ length: 12 }, (_, i) =>
+        `<i style="left:${4 + i * 8}%;background:${MEDALS[i % 3].color};
+          animation-delay:${(i % 5) * 90}ms"></i>`).join("")}</div>
+      <div class="cmed">${top.ic}</div>
+      <h3>${top.lbl}!</h3>
+      <div class="hint" style="margin-top:0">${won.length > 1
+        ? `${won.length} goals moved up at once.` : "Weekly goal reached."}</div>
+    </div>
+    ${lines}${weekLine}
+    <div class="btnrow" style="margin-top:16px">
+      <button class="btn sec" id="chSee">See the week</button>
+      <button class="btn" id="chOk">Nice</button></div>`, () => {
+    $("sheetModal").classList.add("top");
+    buzz([0, 40, 70, 40, 70, 90]);
+    $("chOk").onclick = closeSheet;
+    $("chSee").onclick = () => { closeSheet(); showTab("goals"); };
   });
 }
 
@@ -4598,9 +4773,14 @@ function paintExercise() {
       ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
       ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
       ${e.kmh > 0 ? `<div class="kv"><span>Speed</span><b>${e.kmh} km/h${e.gps ? " (estimate)" : ""}</b></div>` : ""}
-      ${measured.length ? `<div class="kv"><span>Distance measured</span><b>${
-        fmtDist(measured.reduce((s, l) => s + l.km, 0))} over ${measured.length} ${
-        measured.length === 1 ? "session" : "sessions"}</b></div>` : ""}
+      ${measured.length ? (() => {
+        const km = measured.reduce((s, l) => s + l.km, 0), secs = sumSecs(measured);
+        return `<div class="kv"><span>Distance measured</span><b>${fmtDist(km)} over ${
+          measured.length} ${measured.length === 1 ? "session" : "sessions"}</b></div>
+        ${/* what you actually walk, next to what the exercise claims you walk —
+             the pair is how you notice the nominal speed needs correcting */""}
+        <div class="kv"><span>Measured speed</span><b>${fmtSpeedU(km, secs)} average</b></div>`;
+      })() : ""}
       <div class="kv"><span>Count-in</span><b id="evLeadSum">${leadOf(e) ? leadOf(e) + "s" : "none"}</b></div>
       <div class="kv"><span>Distance</span><b id="evGpsSum">${e.gps ? "tracked by GPS" : "not tracked"}</b></div>
       <div class="kv"><span>Cues</span><b id="evCueSum">${cueSummary(e)}</b></div>
@@ -4635,13 +4815,24 @@ function paintExercise() {
 
     <div class="card">
       <h2>Recent</h2>
+      ${/* the whole row opens the session editor, not just the pencil: on a phone
+             a 28px chip is the one target you keep missing, and on a walk the
+             distance you came here to correct is behind it */""}
       <div id="evLogs">${mine.length
-        ? mine.slice(0, 12).map(l => `<div class="exrow" style="cursor:default">
+        ? mine.slice(0, 12).map(l => {
+            const bits = [new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })];
+            // a measured distance and the speed it implies outrank load and cadence,
+            // because on a walk they are the only numbers worth reading
+            if (l.km > 0) bits.push(fmtDist(l.km), fmtSpeedU(l.km, l.secs));
+            else if (e.kmh > 0) bits.push("≈ " + fmtDist(e.kmh * (l.secs / 3600)));
+            if (l.load > 0) bits.push(fmtW(l.load));
+            if (l.rate > 0) bits.push(l.rate + "/min");
+            return `<div class="exrow" data-editlog="${l.id}">
             <div style="flex:1;min-width:0"><div class="t">${fromYmd(l.date).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</div>
-            <div class="s">${new Date(l.ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}${
-              l.load > 0 ? " · " + fmtW(l.load) : ""}${l.rate > 0 ? " · " + l.rate + "/min" : ""}</div></div>
+            <div class="s">${bits.join(" · ")}</div></div>
             <div class="r" style="color:var(--txt);font-weight:700">${mmss(l.secs)}</div>
-            <button class="chip" data-editlog="${l.id}" aria-label="Edit this session">✎</button></div>`).join("")
+            <span class="chip" aria-hidden="true">✎</span></div>`;
+          }).join("")
         : `<div class="empty">No sessions yet.</div>`}</div>
     </div>
 
@@ -4818,7 +5009,9 @@ function openSheet(html, onMount) {
 }
 function closeSheet() {
   $("sheetModal").classList.remove("show");
+  $("sheetModal").classList.remove("top");
   if (!RUN.active && !exViewId) document.body.style.overflow = "";
+  flushCheer();                    // a medal won behind a form gets its turn now
 }
 function askNumber(title, label, value, onOk) {
   openSheet(`<h3>${esc(title)}</h3>
