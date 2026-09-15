@@ -978,7 +978,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "27";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "28";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -1413,6 +1413,8 @@ function fmtHM(mins) {
   const h = Math.floor(m / 60), r = m % 60;
   return r ? `${h}h${pad2(r)}` : `${h}h`;
 }
+// time of day, for the one place that has to say *when* something happened
+const clockTime = ms => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const exById = id => DB.exercises.find(e => e.id === id);
 
 /* ---- measured distance from GPS ----
@@ -1684,7 +1686,12 @@ function geoResetLeg() {
   if (!RUN.geo) return;
   Object.assign(RUN.geo, gpsInit());
 }
-const geoKm = () => (RUN.geo && RUN.geo.state === "ok" ? RUN.geo.km : 0);
+/* The state gate is what makes a denied or fixless watch report nothing rather
+   than a bogus zero-distance measurement. Kilometres already on the accumulator
+   are a different thing: they can only have come from accepted fixes, or from a
+   restored run that measured them before the page was discarded — so they count
+   even while the watch is still looking for the satellite again. */
+const geoKm = () => (RUN.geo && (RUN.geo.state === "ok" || RUN.geo.km > 0) ? RUN.geo.km : 0);
 /* End-of-exercise chimes. Each is a list of [delay ms, frequency, length ms,
    waveform, volume] so they can be previewed from Settings without duplicating
    any playback code. */
@@ -2826,6 +2833,52 @@ function medalUpgrades(before, after) {
 }
 /*</pure>*/
 
+/*<pure:runsave>*/
+/* =====================================================================
+   SURVIVING A LOCKED SCREEN
+   The clock is wall-clock driven, so a page that merely freezes wakes up with
+   the right number. A page that is *killed* is the problem: a backgrounded tab
+   holding GPS and audio is the first thing a phone discards under memory
+   pressure, and with it goes the whole run — the walk you actually did is
+   simply gone, or worse, comes back as whatever the clock last showed.
+
+   So the run is mirrored to its own localStorage key with a heartbeat, and this
+   decides what the next boot should do with what it finds. What we can honestly
+   vouch for is the time up to the last heartbeat; everything after it is a
+   silence we have to own up to rather than paper over:
+
+     resume   the clock was stopped (paused, armed, resting, counting in) or the
+              silence was short enough to be a hiccup — put the run back and
+              keep counting, dead time included: you were still walking.
+     ask      a running clock and a long silence. The run comes back on the
+              confirm screen holding the time we can prove, with the wall clock
+              offered next to it — accepting is a tap, and neither number is
+              invented.
+     none     nothing worth restoring: no run, a stale one, or a clock with
+              barely anything on it.
+   ===================================================================== */
+const RUN_GAP_OK = 120;        // seconds of silence still counted as "carried on"
+const RUN_STALE_H = 12;        // after this a snapshot is history, not a run
+const RUN_MIN_SECS = 5;        // and nothing shorter than this is worth the screen
+function runRecovery(s, now) {
+  if (!s || !s.active || !s.exId || !(s.savedAt > 0) || !(s.startedAt > 0)) return { mode: "none" };
+  const gap = Math.max(0, (now - s.savedAt) / 1000);
+  if (gap > RUN_STALE_H * 3600) return { mode: "none" };
+  // Done was already pressed: the number was captured at the tap and the silence
+  // since then is somebody walking back to their phone, not time on the clock
+  if (s.pending) return { mode: "ask", gap, secs: Math.max(0, s.pending.secs || 0),
+                          full: 0, km: s.pending.km || 0 };
+  // a clock that wasn't running lost nothing while the page was away
+  const stopped = s.paused || s.armed || s.leading || s.resting;
+  const heard = Math.max(0, (s.savedAt - s.startedAt) / 1000);
+  const full = Math.max(0, (now - s.startedAt) / 1000);
+  if (stopped) return { mode: "resume", gap, secs: Math.max(0, s.elapsed || 0), km: s.km || 0 };
+  if (gap <= RUN_GAP_OK) return { mode: "resume", gap, secs: full, km: s.km || 0 };
+  if (heard < RUN_MIN_SECS) return { mode: "none" };
+  return { mode: "ask", gap, secs: heard, full, km: s.km || 0 };
+}
+/*</pure>*/
+
 /* =====================================================================
    RUNNER — the timer. Wall-clock driven (Date.now deltas) so a locked or
    backgrounded phone doesn't drift the count.
@@ -2837,6 +2890,8 @@ function medalUpgrades(before, after) {
 const RUN = {
   active: false, queue: [], idx: 0, exId: null, dur: 0,
   startedAt: 0, elapsed: 0, paused: false, armed: false, over: false,
+  beganAt: 0,                        // wall-clock start of this set; a pause never moves it
+  pendMin: -1,                       // whole minutes shown on the confirm screen, to redraw it
   resting: false, restLeft: 0, restLen: 0, restEnds: 0,
   routineName: "", tick: null, alarm: null, lastCue: -1, fired: {}, cuesOpen: false,
   audio: "ok",                       // "ok" | "off" | "blocked" — set by soundCheck
@@ -2891,7 +2946,7 @@ function startLead(ex) {
 // the clock only really begins here, so this is where elapsed time is zeroed
 function endLead() {
   RUN.leading = false;
-  RUN.startedAt = Date.now(); RUN.elapsed = 0;
+  RUN.startedAt = Date.now(); RUN.elapsed = 0; RUN.beganAt = Date.now();
   RUN.lastCue = -1; RUN.fired = {};
   cueGo();
   renderRunner();
@@ -2900,7 +2955,7 @@ function endLead() {
 // Cancel does, and what an armed-but-not-yet-running exercise looks like.
 function armCurrent(hold) {
   stopAlarm();
-  RUN.startedAt = Date.now(); RUN.elapsed = 0;
+  RUN.startedAt = Date.now(); RUN.elapsed = 0; RUN.beganAt = Date.now();
   RUN.paused = false; RUN.resting = false; RUN.over = false; RUN.leading = false;
   RUN.armed = !!hold; RUN.lastCue = -1; RUN.fired = {};
   geoResetLeg();                      // a fresh clock measures a fresh distance
@@ -2908,6 +2963,17 @@ function armCurrent(hold) {
 function runTick() {
   if (!RUN.active) return;
   const now = Date.now();
+  saveRun();                            // the heartbeat, throttled inside
+  /* The confirm screen is the one place where waiting is expected, and the one
+     place it matters: an accidental Done in a pocket leaves this screen up while
+     you keep walking. So the wall clock behind it stays live and the screen
+     redraws each minute, which is what makes the unaccounted-time offer appear
+     on its own instead of only when you look. */
+  if (RUN.pending) {
+    const w = Math.floor(pendingWall() / 60);
+    if (w !== RUN.pendMin) { RUN.pendMin = w; renderPending(); }
+    return;
+  }
   if (RUN.resting) {
     RUN.restLeft = Math.max(0, RUN.restEnds - now) / 1000;
     // the countdown out of a rest belongs to the exercise you are about to start
@@ -2970,11 +3036,12 @@ function pauseRun() {
   if (RUN.resting || RUN.armed) return;
   if (RUN.paused) { RUN.startedAt = Date.now() - RUN.elapsed * 1000; RUN.paused = false; }
   else { RUN.elapsed = (Date.now() - RUN.startedAt) / 1000; RUN.paused = true; }
+  saveRun(true);
   paintRunner();
 }
 function startArmed() {
   if (!RUN.armed) return;
-  RUN.armed = false; RUN.startedAt = Date.now(); RUN.elapsed = 0;
+  RUN.armed = false; RUN.startedAt = Date.now(); RUN.elapsed = 0; RUN.beganAt = Date.now();
   startLead(exById(RUN.exId));                            // a restart gets counted in too
   renderRunner();
 }
@@ -3011,7 +3078,23 @@ function finishCurrent() {
   if (!RUN.paused) { RUN.elapsed = elapsedNow(); RUN.paused = true; }
   // gpsKm is kept alongside km so discarding an implausible measurement is
   // reversible — km is what gets logged, gpsKm is what the watch actually said
-  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), gpsKm: geoKm(), trimmed: raw - secs };
+  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), gpsKm: geoKm(), trimmed: raw - secs,
+                  beganAt: RUN.beganAt || RUN.startedAt };
+  RUN.pendMin = Math.floor(pendingWall() / 60);
+  renderRunner();
+}
+/* How long ago this set actually started, by the clock on the wall. The timer's
+   own number can legitimately be smaller — a pause, or a Done pressed late and
+   captured at the tap — but it can never honestly be *larger*, so the gap
+   between the two is exactly the time nobody has accounted for. */
+function pendingWall() {
+  const p = RUN.pending;
+  if (!p || !(p.beganAt > 0)) return 0;
+  return Math.max(0, Math.round((Date.now() - p.beganAt) / 1000));
+}
+function fillPending() {
+  if (!RUN.pending) return;
+  RUN.pending.secs = Math.max(RUN.pending.secs, pendingWall());
   renderRunner();
 }
 /* Throw away a measured distance that can't be right and fall back to the
@@ -3064,7 +3147,7 @@ function commitPending() {
 function stopRun(toToday) {
   clearInterval(RUN.tick); RUN.tick = null;
   stopAlarm();
-  RUN.active = false; RUN.pending = null; releaseWake(); geoStop();
+  RUN.active = false; RUN.pending = null; clearRun(); releaseWake(); geoStop();
   document.body.style.overflow = "";
   const r = $("runner"); if (r) r.remove();
   renderAll();
@@ -3081,6 +3164,112 @@ function endRun() {
   if (!RUN.resting && !RUN.armed && secs >= 20 && confirm(`Log the ${mmss(secs)} you already did?`)) logEntry(RUN.exId, secs, null, geoKm());
   stopRun();
 }
+
+/* ---------------------------------------------------------------------
+   The run, mirrored to disk
+   A locked phone is allowed to discard this page — a backgrounded tab holding
+   a GPS watch and an audio context is the first thing it reaches for — and an
+   hour's walk that only ever existed in a variable goes with it.
+
+   So the run writes itself to its own key (never into DB, which syncs), with a
+   heartbeat while the clock runs and a forced write on every transition and
+   every time the page is hidden. Whatever the phone does after that, the last
+   heartbeat is on disk, and runRecovery decides what it is worth.
+   --------------------------------------------------------------------- */
+const RUNKEY = LSKEY + ".run";
+const RUN_BEAT = 4000;                 // heartbeat while the clock runs
+let runBeat = 0;
+function runSnapshot() {
+  const now = Date.now();
+  // during a rest or a count-in the clock isn't the set's clock yet, so there is
+  // nothing to vouch for — the snapshot says zero rather than a stale total
+  const el = RUN.resting || RUN.leading ? 0
+    : RUN.paused || RUN.armed ? RUN.elapsed : (now - RUN.startedAt) / 1000;
+  return {
+    v: 1, active: true, savedAt: now,
+    exId: RUN.exId, queue: RUN.queue.slice(), idx: RUN.idx,
+    dur: RUN.dur, durOverride: RUN.durOverride == null ? null : RUN.durOverride,
+    restLen: RUN.restLen, routineName: RUN.routineName,
+    startedAt: RUN.startedAt, beganAt: RUN.beganAt || RUN.startedAt, elapsed: el,
+    paused: !!RUN.paused, armed: !!RUN.armed, leading: !!RUN.leading,
+    resting: !!RUN.resting, over: !!RUN.over, km: geoKm(),
+    pending: RUN.pending ? { secs: RUN.pending.secs, km: RUN.pending.km,
+                             gpsKm: RUN.pending.gpsKm, trimmed: RUN.pending.trimmed,
+                             beganAt: RUN.pending.beganAt } : null
+  };
+}
+function saveRun(force) {
+  if (!RUN.active) return;
+  const now = Date.now();
+  if (!force && now - runBeat < RUN_BEAT) return;
+  runBeat = now;
+  try { localStorage.setItem(RUNKEY, JSON.stringify(runSnapshot())); } catch (e) {}
+}
+function clearRun() { runBeat = 0; try { localStorage.removeItem(RUNKEY); } catch (e) {} }
+/* Called once at the end of boot. A resume rebuilds the run in place rather than
+   going through startQueue, because none of this is a fresh start: the count-in
+   already happened, the cues already fired, and the distance already exists. */
+function resumeRun() {
+  if (RUN.active) return;
+  let snap = null;
+  try { snap = JSON.parse(localStorage.getItem(RUNKEY) || "null"); } catch (e) {}
+  const rec = runRecovery(snap, Date.now());
+  if (rec.mode === "none" || !exById(snap && snap.exId)) { clearRun(); return; }
+
+  const queue = (snap.queue || []).filter(exById);
+  const ok = queue.length && snap.idx >= 0 && snap.idx < queue.length
+             && queue[snap.idx] === snap.exId;
+  RUN.active = true;
+  RUN.exId = snap.exId;
+  // a run we have to ask about is over as a session: finish this set and be done,
+  // rather than dropping you into set 3 of 5 of a circuit you left an hour ago
+  RUN.queue = ok && rec.mode === "resume" ? queue : [snap.exId];
+  RUN.idx = RUN.queue.length > 1 ? snap.idx : 0;
+  RUN.dur = snap.dur || 0;
+  RUN.durOverride = snap.durOverride == null ? null : snap.durOverride;
+  RUN.restLen = snap.restLen || 0;
+  RUN.routineName = snap.routineName || "";
+  RUN.beganAt = snap.beganAt || snap.startedAt;
+  RUN.over = !!snap.over && RUN.dur > 0;
+  RUN.leading = false; RUN.resting = false;   // a count-in or rest that outlived the page is done
+  RUN.lastCue = -1; RUN.fired = {}; RUN.cuesOpen = false; RUN.pending = null;
+  RUN.alarm = null;
+  const secs = Math.max(0, rec.secs);
+  if (rec.mode === "ask") {
+    // the clock stays parked on what we can prove; the confirm screen offers the
+    // wall clock next to it and logs neither number without a tap
+    RUN.paused = true; RUN.armed = false; RUN.elapsed = secs;
+    RUN.startedAt = Date.now() - secs * 1000;
+    RUN.pending = { secs: Math.round(secs), km: rec.km, gpsKm: rec.km, trimmed: 0,
+                    beganAt: RUN.beganAt, lastBeat: snap.savedAt, recovered: true };
+    RUN.pendMin = Math.floor(pendingWall() / 60);
+  } else if (snap.paused || snap.armed || snap.leading || snap.resting) {
+    RUN.paused = !!snap.paused; RUN.armed = !snap.paused;
+    RUN.elapsed = snap.paused ? secs : 0;
+    RUN.startedAt = Date.now() - RUN.elapsed * 1000;
+    if (RUN.armed) RUN.beganAt = Date.now();
+  } else {
+    RUN.paused = false; RUN.armed = false; RUN.elapsed = secs;
+    RUN.startedAt = Date.now() - secs * 1000;
+  }
+  acquireWake();
+  soundCheck();
+  geoStart();
+  // the kilometres already walked are not re-walkable; the watch picks up from them
+  if (RUN.geo && rec.km > 0) RUN.geo.km = rec.km;
+  document.body.style.overflow = "hidden";
+  RUN.tick = setInterval(runTick, 200);
+  renderRunner();
+  saveRun(true);
+  if (rec.mode === "resume") toast(rec.gap > 5 ? "Timer picked back up" : "Timer restored");
+}
+// Hidden is the last moment we are sure to get: on a phone, "hidden" is often
+// the final callback before the page is frozen or discarded outright.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveRun(true);
+});
+window.addEventListener("pagehide", () => saveRun(true));
+document.addEventListener("freeze", () => saveRun(true));
 /* A denied permission is not re-requestable from script — the browser remembers,
    and only the user can undo it in site settings. So this one explains rather than
    offering a fix button that would do nothing when tapped. */
@@ -3093,9 +3282,14 @@ function geoWarnHTML() {
 function paintDist() {
   const el = $("rDist");
   if (!el || !RUN.geo) return;
-  if (RUN.geo.state === "wait") { el.innerHTML = `<span class="w">📍 finding you…</span>`; return; }
-  if (RUN.geo.state !== "ok") { el.innerHTML = ""; return; }
-  const km = RUN.geo.km, secs = elapsedNow();
+  const km = RUN.geo.km;
+  // a restored leg has kilometres on it before the watch gets a fix back, and
+  // hiding them would look exactly like having lost them
+  if (RUN.geo.state !== "ok" && !(km > 0)) {
+    el.innerHTML = RUN.geo.state === "wait" ? `<span class="w">📍 finding you…</span>` : "";
+    return;
+  }
+  const secs = elapsedNow();
   el.innerHTML = `<b>${fmtDist(km)}</b>`
     + (km > 0 ? ` <span class="s">${fmtSpeedU(km, secs)}</span>` : ` <span class="w">tracking…</span>`);
 }
@@ -3117,6 +3311,9 @@ function renderPending() {
   // dropped the measurement: the log falls back to the nominal speed, and the
   // subline has to stop showing a distance it no longer claims to have measured
   const est = p.km === 0 && p.gpsKm > 0 && ex.kmh > 0 ? ex.kmh * (p.secs / 3600) : 0;
+  // time on the wall vs time on the clock — a minute of slack is tolerable, a
+  // quarter of an hour of it is the whole reason this banner exists
+  const wall = pendingWall(), gapSecs = Math.max(0, wall - p.secs);
   r.className = "runner confirm";
   r.innerHTML = `
     <div class="rtop">
@@ -3128,7 +3325,8 @@ function renderPending() {
       <div class="rthumb">${art(ex.art)}</div>
       <div style="min-width:0">
         <div class="rname">${esc(ex.name)}</div>
-        <div class="rcat"><span class="dot" style="background:${catColor(ex.cat)}"></span>Log this set</div>
+        <div class="rcat"><span class="dot" style="background:${catColor(ex.cat)}"></span>${
+          p.recovered ? "Recovered — nothing is logged yet" : "Log this set"}</div>
       </div>
     </div>
     <div class="pbody2">
@@ -3152,6 +3350,17 @@ function renderPending() {
         <button id="pP1">+1s</button>
         <button id="pP5">+5s</button>
       </div>
+      ${gapSecs >= 60 ? `<div class="sban">
+        <div class="sh">⏱ ${mmss(gapSecs)} ${p.recovered ? "went unrecorded" : "isn't on the clock"}</div>
+        <div class="ss">${p.recovered
+          ? `The phone closed Anvil at ${clockTime(p.lastBeat)} with the screen off, and the
+             last thing it saved was ${mmss(p.secs)}. You started at ${clockTime(p.beganAt)},
+             ${fmtHM(wall / 60)} ago — if you kept going the whole time, that is the walk.`
+          : `You started at ${clockTime(p.beganAt)}, ${fmtHM(wall / 60)} ago, and the timer
+             counted ${mmss(p.secs)}. That happens if the clock was paused, if Done got
+             pressed early, or if the phone put the app to sleep while the screen was off.`}</div>
+        <button id="pFillWall">Use the full ${mmss(wall)}</button>
+      </div>` : ""}
       ${p.trimmed > 0 ? `<div class="hint" style="text-align:center;margin:10px 0 0">${
         p.trimmed}s already trimmed off the overtime — that's the walk back to the phone.</div>` : ""}
       ${bad ? `<div class="sban">
@@ -3184,6 +3393,8 @@ function renderPending() {
   $("pP5").onclick = () => bumpPending(5);
   if ($("pDropKm")) $("pDropKm").onclick = dropPendingDistance;
   if ($("pKeepKm")) $("pKeepKm").onclick = keepPendingDistance;
+  if ($("pFillWall")) $("pFillWall").onclick = fillPending;
+  saveRun(true);       // the number on this screen is worth surviving a reload too
 }
 function renderRunner() {
   let r = $("runner");
@@ -3273,6 +3484,7 @@ function renderRunner() {
     $("rDone").onclick = finishCurrent;
   }
   paintRunner();
+  saveRun(true);       // every transition redraws, so this catches all of them
 }
 function paintRunner() {
   const t = $("rTime"), p = $("rPrg"), sub = $("rSub"), ring = $("rRing");
@@ -6030,7 +6242,7 @@ function boot() {
 
   window.addEventListener("keydown", e => {
     if (e.key !== "Escape") return;
-    if (RUN.active) cancelRun();
+    if (RUN.active) endRun();       // there is no cancelRun; Escape means "get me out"
     else if ($("sheetModal").classList.contains("show")) closeSheet();
     else if ($("streakCal").classList.contains("show")) $("streakCal").classList.remove("show");
     else if ($("dayModal").classList.contains("show")) $("dayModal").classList.remove("show");
@@ -6040,6 +6252,8 @@ function boot() {
 
   renderAll();
   showTab("today");
+  // last, so a run that outlived the page comes back on top of a ready app
+  resumeRun();
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 }
