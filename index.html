@@ -395,7 +395,9 @@
   .minical .mchead button{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--card2);color:var(--txt);font-size:18px;cursor:pointer;}
   .minical .mcdow,.minical .mcgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
   .minical .mcdow span{text-align:center;font-size:10px;color:var(--muted);padding-bottom:2px;}
-  .minical .mcgrid button{aspect-ratio:1;border:none;border-radius:8px;background:var(--card2);color:var(--txt);font-size:13px;cursor:default;
+  /* min-width:0 or a cell's aspect-ratio hands the column an automatic minimum
+     size and the seventh day walks off the right edge of a narrow card */
+  .minical .mcgrid button{aspect-ratio:1;min-width:0;border:none;border-radius:8px;background:var(--card2);color:var(--txt);font-size:13px;cursor:default;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;line-height:1;font-weight:700;}
   .minical .mcgrid button.empty{background:transparent;}
   .minical .mcgrid button.today{box-shadow:inset 0 0 0 3px #fff;}
@@ -419,8 +421,30 @@
     min-width:36px;height:36px;border-radius:10px;font-size:15px;cursor:pointer;padding:0 10px;}
   .fpage .phead button.star{padding:0;font-size:19px;line-height:1;}
   .fpage .phead button.star.on{background:var(--warn);border-color:var(--warn);color:#06101c;}
+  /* Three faces, not one long scroll: the dial you came to set, the record you
+     came to read and the setup you came to change are three different errands,
+     and stacking them meant scrolling past two of them to reach the third. The
+     bar is icon-first because the three glyphs are the fastest thing to hit with
+     a thumb, with the word under it so the gear never has to be guessed at. */
+  .fpage .ptabs{flex:0 0 auto;display:flex;gap:6px;padding:8px 14px 10px;border-bottom:1px solid var(--line);}
+  .fpage .ptabs button{flex:1;min-width:0;background:var(--card2);border:1px solid var(--line);
+    color:var(--muted);border-radius:12px;padding:6px 0 5px;cursor:pointer;display:flex;
+    flex-direction:column;align-items:center;gap:2px;font-size:10px;font-weight:800;
+    letter-spacing:.03em;text-transform:uppercase;}
+  .fpage .ptabs button i{font-style:normal;font-size:19px;line-height:1.05;}
+  .fpage .ptabs button[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#06101c;}
   .fpage .pbody{flex:1;overflow-y:auto;padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
   .fpage .pbody .wrapin{max-width:560px;margin:0 auto;}
+  /* the illustration IS the picker. A 64px tile next to the name reads as "this
+     is what this exercise looks like", which a row of 30 thumbnails does not */
+  .artrow{display:flex;gap:12px;align-items:flex-start;}
+  .artbtn{flex:0 0 auto;width:72px;height:72px;border-radius:16px;background:var(--card2);
+    border:1px solid var(--line);cursor:pointer;padding:6px;display:flex;align-items:center;
+    justify-content:center;position:relative;}
+  .artbtn svg{width:100%;height:100%;color:var(--accent2);}
+  .artbtn::after{content:"✎";position:absolute;right:-4px;bottom:-4px;width:22px;height:22px;
+    border-radius:50%;background:var(--accent);color:#06101c;font-size:11px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;}
   /* same 52px thumbnail the runner uses, so an exercise looks the same whether
      you are about to start it or already running it */
   .fpage .phead .pthumb{flex:0 0 auto;width:38px;height:38px;border-radius:11px;background:var(--card);
@@ -813,7 +837,8 @@
       <div class="field toggle"><span>Keep screen awake</span>
         <label class="switch"><input type="checkbox" id="setWake"><span class="sl"></span></label></div>
       <div class="hint" style="margin-bottom:0">Countdown and mid-session beeps are set
-        per exercise — open one from the Exercises tab, or tap 🔔 on the timer screen.</div>
+        per exercise — open one from the Exercises tab and look on its ⚙️ Setup tab, or tap
+        🔔 on the timer screen.</div>
     </div>
     <div class="card">
       <h2>Spreadsheet sync</h2>
@@ -916,16 +941,22 @@
     <button id="evBack" aria-label="Back">‹</button>
     <span class="pthumb" id="evThumb"></span>
     <span class="pt"><span class="n" id="evTitle"></span><span class="c" id="evCat"></span></span>
-    <button id="evEdit">Edit</button>
     <button id="evFav" aria-label="Favourite">☆</button>
   </div>
-  <div class="pbody"><div class="wrapin" id="evBody"></div></div>
+  <!-- the page always opens on the timer: the dial is what you came for, and the
+       record and the setup are errands you go looking for -->
+  <div class="ptabs" id="evTabs" role="tablist" aria-label="Exercise sections">
+    <button role="tab" data-extab="timer" aria-selected="true" aria-label="Timer"><i>⏱️</i>Timer</button>
+    <button role="tab" data-extab="track" aria-selected="false" aria-label="Record"><i>🏆</i>Record</button>
+    <button role="tab" data-extab="setup" aria-selected="false" aria-label="Setup"><i>⚙️</i>Setup</button>
+  </div>
+  <div class="pbody" id="evScroll"><div class="wrapin" id="evBody"></div></div>
   <div class="pfoot"><div class="wrapin"><button class="btn" id="evStart">Start</button></div></div>
 </div>
 
 <script>
 "use strict";
-const APP_VERSION = "25";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "26";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2226,6 +2257,62 @@ function exTrend(ex, rows, weeks) {
   const pct = Math.round((recent - prior) / prior * 100);
   // ±5% on a hand-timed log is noise, not a trend, and calling it one is a lie
   return { dir: pct > 5 ? "up" : pct < -5 ? "down" : "flat", pct, recent, prior };
+}
+/* ---- one exercise's own run ----
+   The app-wide streaks answer "am I training at all"; this answers "am I keeping
+   THIS up", which needs two numbers rather than one, because the two shapes of
+   exercise disagree about what a run even is: a nightly plank lives on the day
+   count, while a twice-a-week deadlift can only ever read 1 there and is
+   honestly measured in weeks. Today and the current week are graced exactly as
+   they are app-wide — a run must not look like it collapsed because it is 7am
+   on a Monday. */
+function exStreaks(rows) {
+  const days = {}, wks = {};
+  rows.forEach(l => { days[l.date] = true; wks[weekKeyOf(fromYmd(l.date))] = true; });
+  const back = (has, from, step) => {
+    let n = 0, d = has(ymd(from)) ? from : addDays(from, -step);
+    while (has(ymd(d))) { n++; d = addDays(d, -step); }
+    return n;
+  };
+  // one pass over sorted keys: a run continues only if the previous key is
+  // exactly one step behind, which is the same test in days and in weeks
+  const best = (keys, step) => {
+    let top = 0, run = 0, prev = null;
+    keys.forEach(k => {
+      run = prev && ymd(addDays(fromYmd(prev), step)) === k ? run + 1 : 1;
+      if (run > top) top = run;
+      prev = k;
+    });
+    return top;
+  };
+  const dk = Object.keys(days).sort(), wkk = Object.keys(wks).sort();
+  return {
+    day:  { cur: back(k => days[k], midnight(), 1), best: best(dk, 1), last: dk[dk.length - 1] || "" },
+    week: { cur: back(k => wks[k], weekStart(new Date()), 7), best: best(wkk, 7), last: wkk[wkk.length - 1] || "" },
+    days: dk.length, weeks: wkk.length
+  };
+}
+/* Per-day totals for one exercise: seconds for the calendar, and the exercise's
+   own metric for the trace, since a walk's day is kilometres and a curl's is
+   kilograms. */
+function exDayIndex(ex, rows) {
+  const m = EX_METRICS[exMetricKey(ex)], out = {};
+  rows.forEach(l => {
+    const d = out[l.date] || (out[l.date] = { secs: 0, n: 0, val: 0 });
+    d.secs += l.secs; d.n++; d.val += m.of(l, ex);
+  });
+  return out;
+}
+/* The last N days, oldest first, empty days KEPT — a fortnight off is the most
+   important thing a 90-day trace can tell you, and dropping the gap would draw
+   a cheerfully unbroken line straight through it. */
+function exDaily(ex, rows, days) {
+  const ix = exDayIndex(ex, rows), t0 = midnight(), out = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const k = ymd(addDays(t0, -i));
+    out.push(Object.assign({ date: k, secs: 0, n: 0, val: 0 }, ix[k]));
+  }
+  return out;
 }
 
 /* ---- waist ----
@@ -4701,12 +4788,23 @@ function renderExList() {
   bindLogLines($("exList"));
 }
 
-/* ---------- EXERCISE PAGE ---------- */
-let evDur = 0;
+/* ---------- EXERCISE PAGE ----------
+   Three tabs rather than one column. The page used to stack the dial, the
+   record, the progression and the whole setup into a single scroll, which meant
+   the two things you open an exercise to do — set a length and press Start, or
+   fix a number you got wrong — sat a screen and a half apart. Each tab is a
+   separate render so the ones you aren't looking at cost nothing, and `exTab`
+   survives a repaint: logging a session from the Record tab must not throw you
+   back to the timer.                                                          */
+let evDur = 0, exTab = "timer", exCalMonth = null;
+const EX_TABS = [["timer", "⏱️", "Timer"], ["track", "🏆", "Record"], ["setup", "⚙️", "Setup"]];
 function openExercise(id) {
   const e = exById(id); if (!e) return;
   exViewId = id;
   evDur = e.dur || 0;
+  exTab = "timer";                     // always the dial: that is what you came for
+  const t = new Date();
+  exCalMonth = new Date(t.getFullYear(), t.getMonth(), 1);
   $("evTitle").textContent = e.name;
   $("evThumb").innerHTML = art(e.art);
   paintExercise();
@@ -4718,24 +4816,54 @@ function closeExercise() {
   $("exView").classList.remove("show");
   if (!RUN.active) document.body.style.overflow = "";
 }
+function showExTab(t) {
+  if (exTab === t) return;
+  exTab = t;
+  paintExercise();
+  $("evScroll").scrollTop = 0;         // a new tab starts at its own top, not the last one's
+}
 function paintExercise() {
   const e = exById(exViewId); if (!e) { closeExercise(); return; }
-  $("evThumb").innerHTML = art(e.art);                   // Edit can reassign the artwork
+  $("evThumb").innerHTML = art(e.art);                   // Setup can reassign the artwork
   $("evTitle").textContent = e.name;
   $("evCat").innerHTML = `<span class="dot" style="background:${catColor(e.cat)}"></span>${esc(catName(e.cat))}`;
+  $("evTabs").querySelectorAll("[data-extab]").forEach(b => {
+    b.setAttribute("aria-selected", String(b.dataset.extab === exTab));
+    b.onclick = () => showExTab(b.dataset.extab);
+  });
   const mine = DB.logs.filter(l => l.exId === e.id).sort((a, b) => b.ts - a.ts);
-  const total = sumSecs(mine);
-  const mr = monthRange(calYNow(), calMNow());
-  const thisMonth = mine.filter(l => l.date >= mr.from && l.date <= mr.to);
-  const best = mine.reduce((m, l) => Math.max(m, l.secs), 0);
-  const measured = mine.filter(l => l.km > 0);           // GPS sessions, not estimates
+  if (exTab === "track") paintExTrack(e, mine);
+  else if (exTab === "setup") paintExSetup(e, mine);
+  else paintExTimer(e);
+  /* Start is pinned on every tab, and its label is computed here rather than in
+     the timer tab, because sets and rest now live in Setup: the button has to
+     read "× 3" while the field that says 3 is on another tab entirely. */
+  evStartLabel(e);
+  $("evStart").onclick = () => {
+    // the dial is the one thing still uncommitted — everything else in Setup
+    // wrote itself the moment you changed it
+    e.dur = evDur;
+    save(true);
+    renderToday(); renderExList();
+    startExercise(e.id, evDur, Math.max(1, e.sets || 1));
+  };
+  $("evFav").className = "star" + (e.fav ? " on" : "");
+  $("evFav").textContent = e.fav ? "★" : "☆";
+  $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
+}
+function evStartLabel(e) {
+  const n = Math.max(1, e.sets || 1);
+  $("evStart").textContent = `Start ${evDur ? mmss(evDur) : "open"}${n > 1 ? ` × ${n}` : ""} ▶`;
+}
 
-  const kgNow = latestWeightKg();
+/* ---- tab 1: the dial ----
+   Nothing here but the length, what it will burn and what pressing Start will
+   actually do. Sets, rest, count-in, GPS and the cues describe the exercise
+   rather than this run, so they live in Setup and are read from the exercise
+   here — which is also why this tab has no Save of its own. */
+function paintExTimer(e) {
   $("evBody").innerHTML = `
-    <!-- the artwork, name and category all live in the header now, so the page
-         opens straight onto the dial you came here to set -->
     ${e.note ? `<div class="hint" style="text-align:center;margin-top:0">${esc(e.note)}</div>` : ""}
-
     <div class="card" style="margin-top:0">
       <h2>Timer</h2>
       <div class="durbig" id="evDurLab"></div>
@@ -4750,42 +4878,67 @@ function paintExercise() {
           `<span class="chip" data-setdur="${s}">${s ? durLabel(s) : "open"}</span>`).join("")}
       </div>
       <div class="hint" id="evKcal" style="text-align:center"></div>
-      <div class="btnrow" style="margin-top:12px">
-        <div class="field" style="flex:1;margin-bottom:0"><label for="evSets">Sets</label>
-          <input type="number" id="evSets" min="1" max="20" value="${e.sets || 1}"></div>
-        <div class="field" style="flex:1;margin-bottom:0"><label for="evRest">Rest (s)</label>
-          <input type="number" id="evRest" min="0" max="600" step="5" value="${e.setRest == null ? 60 : e.setRest}"></div>
-        <div class="field" style="flex:1;margin-bottom:0"><label for="evLead">Count-in (s)</label>
-          <input type="number" id="evLead" min="0" max="60" step="1" value="${leadOf(e)}"></div>
-      </div>
       <div class="hint" id="evPlan" style="text-align:center"></div>
-      <label class="cuerow"><span>Track distance (GPS)</span>
-        <span class="switch"><input type="checkbox" id="evGps"${e.gps ? " checked" : ""}><span class="sl"></span></span>
-      </label>
-      <div id="evCues">${cueRowsHTML(cuesOf(e))}</div>
-    </div>
+      ${/* what pressing Start is about to sound like, on the tab where you press
+             it — the switches themselves are one tap away in Setup */""}
+      <div class="hint" style="text-align:center">Beeps: <b id="evCueSum">${
+        cueSummary(e)}</b>${e.gps ? " · GPS on" : ""}</div>
+      <div class="hint" style="text-align:center;margin-top:2px;margin-bottom:0">Sets, rest,
+        count-in and the switches are in <b>⚙️ Setup</b>. Starting saves this length.</div>
+    </div>`;
+  const lab = () => {
+    $("evDurLab").textContent = evDur ? mmss(evDur) : "open";
+    const kg = latestWeightKg();
+    $("evKcal").innerHTML = !kg
+      ? `Log your weight to see a calorie estimate`
+      : (evDur ? `≈ <b>${Math.round(kcalFrom(evDur, exerciseMet(e), kg))} kcal</b> at MET ${exerciseMet(e).toFixed(1)}`
+               : `≈ <b>${(kcalFrom(60, exerciseMet(e), kg)).toFixed(1)} kcal/min</b> at MET ${exerciseMet(e).toFixed(1)}`);
+    // the pinned button spells out what it is about to do, since the dial it
+    // reflects is usually scrolled off by the time you reach for it
+    evStartLabel(e);
+    const n = Math.max(1, e.sets || 1), r = Math.max(0, e.setRest == null ? 60 : e.setRest);
+    const total = n * evDur + Math.max(0, n - 1) * r;
+    const reps = e.rate > 0 && evDur ? Math.round(e.rate * evDur / 60) * n : 0;
+    $("evPlan").textContent = (n > 1
+      ? `${n} sets of ${evDur ? mmss(evDur) : "open"} with ${r}s rest — about ${minsOf(total)} min in all`
+      : leadOf(e) ? `${leadOf(e)}s count-in first` : "")
+      + (reps ? `${n > 1 ? " · " : ""}roughly ${reps} reps at ${e.rate}/min` : "");
+  };
+  lab();
+  // fixed steps, not adaptive ones: you always know what a tap is worth
+  const bump = s => { evDur = Math.max(0, Math.min(7200, evDur + s)); lab(); };
+  $("evMinus1").onclick = () => bump(-60);
+  $("evMinus").onclick = () => bump(-15);
+  $("evPlus").onclick = () => bump(15);
+  $("evPlus1").onclick = () => bump(60);
+  $("evBody").querySelectorAll("[data-setdur]").forEach(c =>
+    c.onclick = () => { evDur = +c.dataset.setdur; lab(); });
+}
 
-    <div class="card">
-      <h2>Details</h2>
-      <div class="kv"><span>Intensity (MET)</span><b>${exerciseMet(e).toFixed(1)}</b></div>
-      ${kgNow ? `<div class="kv"><span>Burn at ${fmtW(kgNow)}</span><b>${kcalFrom(60, exerciseMet(e), kgNow).toFixed(1)} kcal/min</b></div>` : ""}
-      <div class="kv"><span>Default length</span><b>${durLabel(e.dur)}${e.sets > 1 ? ` × ${e.sets} sets` : ""}</b></div>
-      ${e.load > 0 ? `<div class="kv"><span>Default load</span><b>${fmtW(e.load)}</b></div>` : ""}
-      ${e.rate > 0 ? `<div class="kv"><span>Cadence</span><b>${e.rate}/min</b></div>` : ""}
-      ${e.kmh > 0 ? `<div class="kv"><span>Speed</span><b>${e.kmh} km/h${e.gps ? " (estimate)" : ""}</b></div>` : ""}
-      ${measured.length ? (() => {
-        const km = measured.reduce((s, l) => s + l.km, 0), secs = sumSecs(measured);
-        return `<div class="kv"><span>Distance measured</span><b>${fmtDist(km)} over ${
-          measured.length} ${measured.length === 1 ? "session" : "sessions"}</b></div>
-        ${/* what you actually walk, next to what the exercise claims you walk —
-             the pair is how you notice the nominal speed needs correcting */""}
-        <div class="kv"><span>Measured speed</span><b>${fmtSpeedU(km, secs)} average</b></div>`;
-      })() : ""}
-      <div class="kv"><span>Count-in</span><b id="evLeadSum">${leadOf(e) ? leadOf(e) + "s" : "none"}</b></div>
-      <div class="kv"><span>Distance</span><b id="evGpsSum">${e.gps ? "tracked by GPS" : "not tracked"}</b></div>
-      <div class="kv"><span>Cues</span><b id="evCueSum">${cueSummary(e)}</b></div>
-      <div class="hint" style="margin-bottom:0">MET, load, cadence and speed are set in <b>Edit</b>.
-        Everything in the Timer card is saved to this exercise the moment you press Start.</div>
+/* ---- tab 2: the record ----
+   Everything that looks backwards, in the order the questions get asked: am I
+   keeping this up, what have I done in total, how far up the ladder, is the
+   trend up, when exactly did I do it, and what were the last dozen sessions. */
+function paintExTrack(e, mine) {
+  const total = sumSecs(mine);
+  const mr = monthRange(calYNow(), calMNow());
+  const thisMonth = mine.filter(l => l.date >= mr.from && l.date <= mr.to);
+  const best = mine.reduce((m, l) => Math.max(m, l.secs), 0);
+  const st = exStreaks(mine);
+  $("evBody").innerHTML = `
+    <div class="card" style="margin-top:0">
+      <h2>Streak</h2>
+      ${/* two runs, not one: a nightly plank lives on the day count and a
+             twice-a-week press only ever reads 1 there — see exStreaks */""}
+      <div class="streakrow">
+        <div class="stat"><div class="n">${st.day.cur}<small>d</small></div><div class="l">days in a row</div></div>
+        <div class="stat"><div class="n">${st.week.cur}<small>w</small></div><div class="l">weeks in a row</div></div>
+        <div class="stat"><div class="n">${st.weeks}</div><div class="l">weeks trained</div></div>
+      </div>
+      <div class="hint" style="margin-bottom:0">${mine.length
+        ? `Best run ${st.day.best} day${st.day.best === 1 ? "" : "s"} · ${st.week.best} week${
+            st.week.best === 1 ? "" : "s"} · last done ${relDay(mine[0].ts)}`
+        : "Nothing logged yet — the first session starts both runs."}</div>
     </div>
 
     <div class="card">
@@ -4796,7 +4949,7 @@ function paintExercise() {
         <div class="stat"><div class="n">${minsOf(sumSecs(thisMonth))}</div><div class="l">Min this month</div></div>
       </div>
       <div class="hint">${mine.length
-        ? `Last done ${relDay(mine[0].ts)} · longest set ${mmss(best)}`
+        ? `Longest set ${mmss(best)}`
         : "Not logged yet."}${canEstimateKcal() && mine.length
         ? ` · ${Math.round(kcalOfLogs(mine))} kcal all time` : ""}</div>
       ${(() => {
@@ -4806,11 +4959,57 @@ function paintExercise() {
         return `<div class="kv" style="margin-top:8px"><span>Last lifted</span><b>${fmtW(withLoad[0].load)}</b></div>`
           + (heaviest > withLoad[0].load ? `<div class="kv"><span>Heaviest</span><b>${fmtW(heaviest)}</b></div>` : "");
       })()}
+      ${(() => {
+        const measured = mine.filter(l => l.km > 0);
+        if (!measured.length) return "";
+        const km = measured.reduce((s, l) => s + l.km, 0), secs = sumSecs(measured);
+        return `<div class="kv"><span>Distance measured</span><b>${fmtDist(km)} over ${
+          measured.length} ${measured.length === 1 ? "session" : "sessions"}</b></div>
+        ${/* what you actually walk, next to what the exercise claims you walk —
+             the pair is how you notice the nominal speed needs correcting */""}
+        <div class="kv"><span>Measured speed</span><b>${fmtSpeedU(km, secs)} average</b></div>`;
+      })()}
+    </div>
+
+    <div class="card">
+      <h2>Milestones</h2>
+      ${(() => {
+        const ms = exMilestones(e, mine);
+        // rope work counts jumps; everything else with a cadence counts reps
+        const nameOf = { dist: "distance covered", vol: "total lifted", time: "time held",
+                         reps: e.art === "jumprope" ? "jumps" : "reps done" };
+        return `<div class="hint" style="margin-top:0">${ms.totalTxt} — ${nameOf[ms.key]}${
+          ms.key === "time" && exMetricKey(e) === "time" && !(e.rate > 0) && !(e.kmh > 0)
+            ? ". Give this one a cadence, load or speed in ⚙️ Setup to count reps, tonnes or kilometres instead." : "."}
+        <div class="badgegrid">${ms.list.map(x => `
+          <div class="badge ${x.earned ? "on" : ""}">
+            <div class="bic">${x.ic}</div>
+            <div class="bn">${x.label}</div>
+            ${x.earned ? `<div class="bp done">earned</div>`
+              : `<div class="bbar"><i style="width:${x.pct}%"></i></div>
+                 <div class="bp">${Math.round(x.pct)}%</div>`}
+          </div>`).join("")}</div>`;
+      })()}
     </div>
 
     <div class="card">
       <h2>Progress</h2>
       ${progressCard(e, mine)}
+    </div>
+
+    <div class="card">
+      <h2>Last 90 days</h2>
+      ${ex90Chart(e, mine)}
+    </div>
+
+    <div class="card">
+      <h2>Calendar</h2>
+      <div class="minical">
+        <div class="mchead"><button type="button" id="evCalPrev">‹</button><span id="evCalLab"></span><button type="button" id="evCalNext">›</button></div>
+        <div class="mcdow" id="evCalDow"></div>
+        <div class="mcgrid" id="evCalGrid"></div>
+      </div>
+      <div class="hint" id="evCalNote" style="margin-bottom:0"></div>
     </div>
 
     <div class="card">
@@ -4836,92 +5035,237 @@ function paintExercise() {
         : `<div class="empty">No sessions yet.</div>`}</div>
     </div>
 
-    <div class="card">
-      <h2>Milestones</h2>
-      ${(() => {
-        const ms = exMilestones(e, mine);
-        // rope work counts jumps; everything else with a cadence counts reps
-        const nameOf = { dist: "distance covered", vol: "total lifted", time: "time held",
-                         reps: e.art === "jumprope" ? "jumps" : "reps done" };
-        return `<div class="hint" style="margin-top:0">${ms.totalTxt} — ${nameOf[ms.key]}${
-          ms.key === "time" && exMetricKey(e) === "time" && !(e.rate > 0) && !(e.kmh > 0)
-            ? ". Give this one a cadence, load or speed in ✎ to count reps, tonnes or kilometres instead." : "."}
-        <div class="badgegrid">${ms.list.map(x => `
-          <div class="badge ${x.earned ? "on" : ""}">
-            <div class="bic">${x.ic}</div>
-            <div class="bn">${x.label}</div>
-            ${x.earned ? `<div class="bp done">earned</div>`
-              : `<div class="bbar"><i style="width:${x.pct}%"></i></div>
-                 <div class="bp">${Math.round(x.pct)}%</div>`}
-          </div>`).join("")}</div>`;
-      })()}
-    </div>
-
     <button class="btn sec" id="evLogManual">Log without the timer</button>`;
-
-  const lab = () => {
-    $("evDurLab").textContent = evDur ? mmss(evDur) : "open";
-    const kg = latestWeightKg();
-    $("evKcal").innerHTML = !kg
-      ? `Log your weight to see a calorie estimate`
-      : (evDur ? `≈ <b>${Math.round(kcalFrom(evDur, exerciseMet(e), kg))} kcal</b> at MET ${exerciseMet(e).toFixed(1)}`
-               : `≈ <b>${(kcalFrom(60, exerciseMet(e), kg)).toFixed(1)} kcal/min</b> at MET ${exerciseMet(e).toFixed(1)}`);
-    // the pinned button spells out what it is about to do, since the dial it
-    // reflects is usually scrolled off by the time you reach for it
-    const n = Math.max(1, +($("evSets") || {}).value || 1);
-    $("evStart").textContent = `Start ${evDur ? mmss(evDur) : "open"}${n > 1 ? ` × ${n}` : ""} ▶`;
-  };
-  lab();
-  // fixed steps, not adaptive ones: you always know what a tap is worth
-  const bump = s => { evDur = Math.max(0, Math.min(7200, evDur + s)); lab(); plan(); };
-  $("evMinus1").onclick = () => bump(-60);
-  $("evMinus").onclick = () => bump(-15);
-  $("evPlus").onclick = () => bump(15);
-  $("evPlus1").onclick = () => bump(60);
-  $("evBody").querySelectorAll("[data-setdur]").forEach(c =>
-    c.onclick = () => { evDur = +c.dataset.setdur; lab(); plan(); });
-  const plan = () => {
-    const n = Math.max(1, +$("evSets").value || 1), r = Math.max(0, +$("evRest").value || 0);
-    const total = n * evDur + Math.max(0, n - 1) * r;
-    $("evPlan").textContent = n > 1
-      ? `${n} sets of ${evDur ? mmss(evDur) : "open"} with ${r}s rest — about ${minsOf(total)} min in all`
-      : "";
-    const reps = e.rate > 0 && evDur ? Math.round(e.rate * evDur / 60) * n : 0;
-    if (reps) $("evPlan").textContent += ` · roughly ${reps} reps at ${e.rate}/min`;
-  };
-  plan();
-  $("evSets").oninput = () => { plan(); lab(); };
-  $("evRest").oninput = plan;
-  $("evLead").oninput = () => {
-    const n = leadOf({ lead: $("evLead").value });
-    $("evLeadSum").textContent = n ? n + "s" : "none";
-  };
-  // this one writes on toggle rather than waiting for Start, like the cues: it
-  // changes what the next session measures, and you may well be about to read
-  // the Details line to check it took
-  $("evGps").onchange = () => {
-    e.gps = $("evGps").checked;
-    save(true);
-    $("evGpsSum").textContent = e.gps ? "tracked by GPS" : "not tracked";
-  };
-  // Starting IS the save. Whatever you dialled in becomes this exercise's default,
-  // so there is nothing to remember to press afterwards — cues already write on
-  // toggle, and now length, sets and rest commit the same way.
-  $("evStart").onclick = () => {
-    const n = Math.max(1, +$("evSets").value || 1);
-    e.dur = evDur; e.sets = n; e.setRest = Math.max(0, +$("evRest").value || 0);
-    e.lead = leadOf({ lead: $("evLead").value });
-    e.gps = $("evGps").checked;
-    save(true);
-    renderToday(); renderExList();
-    startExercise(e.id, evDur, n);
-  };
-  bindCueRows($("evCues"), e.id);
-  $("evFav").className = "star" + (e.fav ? " on" : "");
-  $("evFav").textContent = e.fav ? "★" : "☆";
-  $("evFav").onclick = () => { e.fav = !e.fav; save(true); paintExercise(); renderToday(); renderExList(); };
+  renderExCal(e, mine);
+  $("evCalPrev").onclick = () => { exCalMonth.setMonth(exCalMonth.getMonth() - 1); renderExCal(e, mine); };
+  $("evCalNext").onclick = () => { exCalMonth.setMonth(exCalMonth.getMonth() + 1); renderExCal(e, mine); };
   $("evLogManual").onclick = () => manualLog(e.id);
   bindLogLines($("evLogs"));
+}
+/* This exercise's own month, in the same grid the streak calendar uses so a day
+   cell means the same thing wherever you meet one. Minutes are stamped on the
+   day rather than a tick, because "was I here" and "for how long" are the same
+   question at a glance. */
+function renderExCal(e, mine) {
+  if (!exCalMonth) return;
+  const y = exCalMonth.getFullYear(), m = exCalMonth.getMonth();
+  const ix = exDayIndex(e, mine);
+  $("evCalLab").textContent = MONTHS[m] + " " + y;
+  $("evCalDow").innerHTML = DOWL.map(d => `<span>${d}</span>`).join("");
+  const grid = $("evCalGrid"); grid.innerHTML = "";
+  const first = dowMon(new Date(y, m, 1)), dim = daysInMonth(y, m), tk = todayStr();
+  const col = catColor(e.cat);
+  let days = 0, secs = 0;
+  for (let i = 0; i < first; i++) { const b = document.createElement("button"); b.className = "empty"; grid.appendChild(b); }
+  for (let d = 1; d <= dim; d++) {
+    const k = `${y}-${pad2(m + 1)}-${pad2(d)}`, hit = ix[k];
+    const b = document.createElement("button");
+    b.innerHTML = `<span class="scn">${d}</span><span class="scm">${hit ? minsOf(hit.secs) + "m" : ""}</span>`;
+    if (hit) {
+      // the exercise's own category colour, so a month of walking looks like the
+      // walking tile and not like a generic heatmap
+      b.style.background = col; b.style.color = "#06101c";
+      b.title = `${minsOf(hit.secs)} min · ${hit.n} session${hit.n === 1 ? "" : "s"}`;
+      days++; secs += hit.secs;
+    }
+    if (k === tk) b.classList.add("today");
+    grid.appendChild(b);
+  }
+  for (let i = first + dim; i < 42; i++) { const b = document.createElement("button"); b.className = "empty"; grid.appendChild(b); }
+  $("evCalNote").innerHTML = days
+    ? `${days} day${days === 1 ? "" : "s"} · ${minsOf(secs)} min this month`
+    : `Nothing this month.`;
+}
+/* The same trace History draws for everything, narrowed to one exercise and
+   counted in that exercise's own metric. Ninety days is the window where a
+   habit is visible: long enough to show a fortnight off, short enough that a
+   single session still moves the line. */
+function ex90Chart(e, mine) {
+  const days = exDaily(e, mine, 90);
+  const m = EX_METRICS[exMetricKey(e)];
+  if (!days.some(d => d.val > 0)) return `<div class="empty">Nothing in the last 90 days.</div>`;
+  const W = 300, H = 100, n = days.length, max = Math.max(...days.map(d => d.val));
+  const xy = days.map((d, i) => [(i / (n - 1)) * W, H - (d.val / max) * H]);
+  const line = xy.map(p => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
+  let grid = "";
+  for (let i = 0; i < n; i++) {
+    const d = fromYmd(days[i].date), x = ((i / (n - 1)) * W).toFixed(1);
+    if (d.getDate() === 1) grid += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#9aa3b2" stroke-width="1" opacity=".4" vector-effect="non-scaling-stroke"/>`;
+    else if (d.getDay() === 1) grid += `<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="#9aa3b2" stroke-width="1" opacity=".12" vector-effect="non-scaling-stroke"/>`;
+  }
+  const done = days.filter(d => d.val > 0);
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:110px;display:block"
+      role="img" aria-label="${esc(m.fmt(max))} on the biggest day, 90 days shown">${grid}
+      <polygon points="0,${H} ${line} ${W},${H}" fill="var(--accent)" opacity=".15"/>
+      <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"
+        stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>
+    <div class="bandlab" style="margin-top:4px"><span>90 days ago</span>
+      <span>${esc(m.fmt(max))} biggest day</span><span>today</span></div>
+    <div class="hint" style="margin-bottom:0">Done on ${done.length} of the last 90 days · faint
+      verticals mark Mondays, solid ones the 1st. Empty days are drawn, not skipped — the gaps
+      are the point.</div>`;
+}
+
+/* ---- tab 3: the setup ----
+   Every field writes straight to the exercise, which is why there is no Save
+   button to forget: a number you typed and a number the app is using can never
+   disagree. Text commits as you type (so nothing is lost by walking away),
+   numbers on blur (so a half-typed "1" of "12" is never briefly the truth), and
+   nothing here re-renders the tab under your thumb — the readouts that depend on
+   a field are patched in place instead. */
+function paintExSetup(e, mine) {
+  const kgNow = latestWeightKg();
+  $("evBody").innerHTML = `
+    <div class="card" style="margin-top:0">
+      <h2>Exercise</h2>
+      <div class="artrow">
+        ${/* the picture is the button: a grid of thirty thumbnails inline would
+               push every field below the fold */""}
+        <button type="button" class="artbtn" id="seArt" aria-label="Change the illustration">${art(e.art)}</button>
+        <div style="flex:1;min-width:0">
+          <div class="field" style="margin-bottom:10px"><label for="seName">Name</label>
+            <input id="seName" value="${esc(e.name)}" autocomplete="off"></div>
+          <div class="field" style="margin-bottom:0"><label for="seCat">Category</label>
+            <select id="seCat">${CATS.map(c =>
+              `<option value="${c.id}" ${c.id === e.cat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:14px">Tap the picture to change it. Everything on
+        this tab saves itself — there is no Save button.</div>
+      <div class="field"><label for="seNote">Note (form cue, tempo…)</label>
+        <input id="seNote" value="${esc(e.note || "")}" autocomplete="off"></div>
+      <div class="btnrow">
+        <div class="field" style="flex:1"><label for="seMet">Intensity (MET)</label>
+          <input type="number" id="seMet" min="1" max="20" step="0.1" value="${e.met || CAT_MET[e.cat] || 4}"></div>
+        <div class="field" style="flex:1"><label for="seLoad">Load (${wUnit()}, optional)</label>
+          <input type="number" id="seLoad" min="0" step="0.5" value="${e.load ? Math.round(toDisplayW(e.load) * 10) / 10 : ""}"></div>
+      </div>
+      <div class="btnrow">
+        <div class="field" style="flex:1"><label for="seRate">Cadence — reps / min</label>
+          <input type="number" id="seRate" min="0" max="400" step="5" value="${e.rate || ""}"></div>
+        <div class="field" style="flex:1"><label for="seKmh">Speed — km/h</label>
+          <input type="number" id="seKmh" min="0" max="40" step="0.1" value="${e.kmh || ""}"></div>
+      </div>
+      <div class="hint" style="margin-top:-8px">MET is the published metabolic cost of the
+        activity and drives the calorie estimate — 3.5 is light resistance work, 8 is
+        vigorous, 11.8 is a moderate rope pace. For rope exercises a cadence picks the
+        MET band for you (&lt;100/min 8.8, 100–120 11.8, 120+ 12.3). Load is tracked for
+        progression; it doesn't inflate the estimate. A speed turns minutes into kilometres
+        for the milestones.</div>
+      <div class="field toggle" style="margin-bottom:0"><span>Show in Today's routine</span>
+        <label class="switch"><input type="checkbox" id="seFav" ${e.fav ? "checked" : ""}><span class="sl"></span></label></div>
+    </div>
+
+    <div class="card">
+      <h2>Timer</h2>
+      <div class="btnrow">
+        <div class="field" style="flex:1;margin-bottom:0"><label for="evSets">Sets</label>
+          <input type="number" id="evSets" min="1" max="20" value="${e.sets || 1}"></div>
+        <div class="field" style="flex:1;margin-bottom:0"><label for="evRest">Rest (s)</label>
+          <input type="number" id="evRest" min="0" max="600" step="5" value="${e.setRest == null ? 60 : e.setRest}"></div>
+        <div class="field" style="flex:1;margin-bottom:0"><label for="evLead">Count-in (s)</label>
+          <input type="number" id="evLead" min="0" max="60" step="1" value="${leadOf(e)}"></div>
+      </div>
+      <div class="hint" id="sePlan"></div>
+      <label class="cuerow"><span>Track distance (GPS)</span>
+        <span class="switch"><input type="checkbox" id="evGps"${e.gps ? " checked" : ""}><span class="sl"></span></span>
+      </label>
+      <div id="evCues">${cueRowsHTML(cuesOf(e))}</div>
+      <div class="hint" style="margin-bottom:0">The length itself is on the ⏱️ Timer tab, where
+        pressing Start saves it.</div>
+    </div>
+
+    <div class="card">
+      <h2>Details</h2>
+      ${/* only what the fields above can't already tell you: what the MET means
+             in calories at today's weight, and what has actually been measured */""}
+      <div class="kv" id="seBurnRow"><span>Burn${kgNow ? ` at ${fmtW(kgNow)}` : ""}</span><b id="seBurn"></b></div>
+      <div class="kv"><span>Counts towards</span><b>${esc(EX_METRICS[exMetricKey(e)].unit)} milestones</b></div>
+      <div class="kv"><span>Logged</span><b>${mine.length} session${mine.length === 1 ? "" : "s"}${
+        mine.length ? ` · ${fmtH(sumSecs(mine))}h` : ""}</b></div>
+      <div class="hint" style="margin-bottom:0">Deleting keeps every logged session in your
+        history — the exercise stops being offered, the record stays true.</div>
+    </div>
+
+    <button class="btn danger" id="seDel">Delete exercise</button>`;
+
+  /* one place that knows which readouts depend on a field, so a change can patch
+     them instead of re-rendering the tab under the thumb that made it */
+  const echo = () => {
+    const kg = latestWeightKg();
+    $("seBurn").textContent = kg ? `${kcalFrom(60, exerciseMet(e), kg).toFixed(1)} kcal/min at MET ${
+      exerciseMet(e).toFixed(1)}` : `MET ${exerciseMet(e).toFixed(1)} — log your weight for calories`;
+    const n = Math.max(1, e.sets || 1), r = Math.max(0, e.setRest == null ? 60 : e.setRest);
+    $("sePlan").textContent = `${n > 1 ? `${n} sets of ${durLabel(e.dur)} with ${r}s rest` : `One set of ${durLabel(e.dur)}`}${
+      leadOf(e) ? `, ${leadOf(e)}s count-in` : ""} — about ${minsOf(n * (e.dur || 0) + Math.max(0, n - 1) * r + leadOf(e) * n)} min`;
+    evStartLabel(e);
+  };
+  echo();
+  /* A number is committed on blur, clamped to the range its own input declares,
+     then written back — a clamped or defaulted value must not sit in the field
+     looking accepted. `shown` is for the fields where what got stored isn't what
+     was typed: blanking the MET falls back to the category's, and the field has to
+     say so rather than stay empty. Blank stays blank where blank means "none". */
+  const num = (id, set, lo, hi, shown) => $(id).onchange = () => {
+    const raw = $(id).value.trim();
+    const v = raw === "" ? 0 : Math.min(hi, Math.max(lo, +raw || 0));
+    set(v);
+    const out = shown ? shown() : v;
+    $(id).value = raw === "" && !out ? "" : out;
+    save(true); echo(); renderToday(); renderExList();
+  };
+  /* Text writes on every keystroke: `change` alone would lose a rename to a tab
+     switch, and this page has three tabs to switch to. A blank name is refused
+     on commit rather than as you type, so backspacing to retype isn't a fight. */
+  $("seName").oninput = () => {
+    const n = $("seName").value.trim();
+    if (!n) return;
+    e.name = n; $("evTitle").textContent = n; save();
+  };
+  $("seName").onchange = () => {
+    if (!$("seName").value.trim()) { $("seName").value = e.name; toast("An exercise needs a name", "err"); return; }
+    save(true); renderToday(); renderExList();
+  };
+  $("seNote").oninput = () => { e.note = $("seNote").value; save(); };
+  $("seNote").onchange = () => { e.note = $("seNote").value.trim(); $("seNote").value = e.note; save(true); };
+  $("seCat").onchange = () => {
+    e.cat = $("seCat").value;
+    save(true);
+    // the header carries the category, and the calendar takes its colour
+    $("evCat").innerHTML = `<span class="dot" style="background:${catColor(e.cat)}"></span>${esc(catName(e.cat))}`;
+    renderToday(); renderExList();
+  };
+  num("seMet", v => e.met = Math.max(1, v || CAT_MET[e.cat] || 4), 1, 20, () => e.met);
+  num("seLoad", v => e.load = fromDisplayW(v), 0, 1000);
+  num("seRate", v => e.rate = v, 0, 400);
+  num("seKmh", v => e.kmh = v, 0, 40);
+  num("evSets", v => e.sets = Math.max(1, v || 1), 1, 20, () => e.sets);
+  num("evRest", v => e.setRest = v, 0, 600);
+  num("evLead", v => e.lead = v, 0, 60);
+  $("seFav").onchange = () => {
+    e.fav = $("seFav").checked; save(true);
+    $("evFav").className = "star" + (e.fav ? " on" : "");
+    $("evFav").textContent = e.fav ? "★" : "☆";
+    renderToday(); renderExList();
+  };
+  // like the cues, this one writes on toggle: it changes what the next session
+  // measures, and what the milestones count from here on
+  $("evGps").onchange = () => { e.gps = $("evGps").checked; save(true); };
+  bindCueRows($("evCues"), e.id);
+  $("seArt").onclick = () => pickArt(e.art, k => {
+    e.art = k; save(true);
+    $("seArt").innerHTML = art(k); $("evThumb").innerHTML = art(k);
+    renderToday(); renderExList();
+  });
+  $("seDel").onclick = () => {
+    const used = mine.length;
+    if (!confirm(used ? `Delete "${e.name}"? Its ${used} logged session${used === 1 ? "" : "s"} stay in history.`
+                      : `Delete "${e.name}"?`)) return;
+    snapshotForUndo("delete exercise");
+    e.arch = true;                                       // soft-delete keeps history joins intact
+    DB.routines.forEach(r => r.items = r.items.filter(i => i !== e.id));
+    save(true); closeExercise(); renderAll(); offerUndo(`Deleted ${e.name}`);
+  };
 }
 
 /* ---------- STREAK CALENDAR ---------- */
@@ -5025,87 +5369,81 @@ function askNumber(title, label, value, onOk) {
   });
 }
 
-function editExercise(ex) {
-  const isNew = !ex;
-  const e = ex || { id: null, name: "", cat: "dumbbell", dur: 60, art: "generic", fav: false,
-    note: "", ord: DB.exercises.length, met: CAT_MET.dumbbell, load: 0, rate: 0 };
+/* One art grid, two callers: the new-exercise sheet and the Setup tab's
+   thumbnail. A sheet rather than an inline grid, because thirty-odd tiles is a
+   page of its own and the field you were editing should still be where you left
+   it when you come back. Picking closes it — an illustration needs no
+   confirmation, and Setup saves as you go. */
+function pickArt(cur, onPick) {
+  openSheet(`<h3>Illustration</h3>
+    <div id="artPick" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+      ${ART_KEYS.map(k => `<button type="button" class="chip${k === cur ? " on" : ""}" data-art="${k}"
+        style="padding:4px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:12px">
+        <span style="width:100%;height:100%;display:block;color:${
+          k === cur ? "#06101c" : "var(--accent2)"}">${art(k)}</span></button>`).join("")}
+    </div>
+    <div class="btnrow"><button class="btn sec" id="apCancel">Keep this one</button></div>`, () => {
+    $("artPick").querySelectorAll("[data-art]").forEach(b =>
+      b.onclick = () => { closeSheet(); onPick(b.dataset.art); });
+    $("apCancel").onclick = closeSheet;
+  });
+}
+
+/* Creating one only. Editing an existing exercise is the Setup tab of its own
+   page now — a sheet that duplicated those fields would be a second place for
+   the same number to be wrong. So this asks for the four things an exercise
+   can't exist without and lets Setup do the rest.
+
+   `draft` is how the illustration picker gets its answer back: one sheet at a
+   time means the picker replaces this form, so the form re-opens around the
+   choice with whatever had already been typed into it. */
+function newExercise(draft) {
+  const e = Object.assign({ name: "", cat: "dumbbell", dur: 60, art: "generic" }, draft);
   openSheet(`
-    <h3>${isNew ? "New exercise" : "Edit exercise"}</h3>
-    <div class="field"><label for="exName">Name</label><input id="exName" value="${esc(e.name)}" autocomplete="off"></div>
-    <div class="field"><label for="exCat">Category</label>
-      <select id="exCat">${CATS.map(c => `<option value="${c.id}" ${c.id === e.cat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
-    <div class="btnrow">
+    <h3>New exercise</h3>
+    <div class="artrow">
+      <button type="button" class="artbtn" id="exArt" aria-label="Change the illustration">${art(e.art)}</button>
+      <div style="flex:1;min-width:0">
+        <div class="field" style="margin-bottom:10px"><label for="exName">Name</label>
+          <input id="exName" value="${esc(e.name)}" autocomplete="off"></div>
+        <div class="field" style="margin-bottom:0"><label for="exCat">Category</label>
+          <select id="exCat">${CATS.map(c =>
+            `<option value="${c.id}" ${c.id === e.cat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
+      </div>
+    </div>
+    <div class="btnrow" style="margin-top:14px">
       <div class="field" style="flex:1"><label for="exMin">Minutes</label>
         <input type="number" id="exMin" min="0" max="180" value="${Math.floor(e.dur / 60)}"></div>
       <div class="field" style="flex:1"><label for="exSec">Seconds</label>
         <input type="number" id="exSec" min="0" max="59" step="5" value="${e.dur % 60}"></div>
     </div>
-    <div class="hint" style="margin-top:-8px">Both zero = open-ended stopwatch.</div>
-    <div class="field" style="margin-top:14px"><label for="exNote">Note (form cue, tempo…)</label>
-      <input id="exNote" value="${esc(e.note || "")}" autocomplete="off"></div>
-    <div class="btnrow">
-      <div class="field" style="flex:1"><label for="exMet">Intensity (MET)</label>
-        <input type="number" id="exMet" min="1" max="20" step="0.1" value="${e.met || CAT_MET[e.cat] || 4}"></div>
-      <div class="field" style="flex:1"><label for="exLoad">Load (${wUnit()}, optional)</label>
-        <input type="number" id="exLoad" min="0" step="0.5" value="${e.load ? Math.round(toDisplayW(e.load) * 10) / 10 : ""}"></div>
-    </div>
-    <div class="btnrow">
-      <div class="field" style="flex:1"><label for="exRate">Cadence — reps / min</label>
-        <input type="number" id="exRate" min="0" max="400" step="5" value="${e.rate || ""}"></div>
-      <div class="field" style="flex:1"><label for="exKmh">Speed — km/h</label>
-        <input type="number" id="exKmh" min="0" max="40" step="0.1" value="${e.kmh || ""}"></div>
-    </div>
-    <div class="hint" style="margin-top:-8px">MET is the published metabolic cost of the
-      activity and drives the calorie estimate — 3.5 is light resistance work, 8 is
-      vigorous, 11.8 is a moderate rope pace. For rope exercises a cadence picks the
-      MET band for you (&lt;100/min 8.8, 100–120 11.8, 120+ 12.3). Load is tracked for
-      progression; it doesn't inflate the estimate. A speed turns minutes into kilometres
-      for the milestones below the exercise.</div>
-    <div class="field toggle"><span>Show in Today's routine</span>
-      <label class="switch"><input type="checkbox" id="exFav" ${e.fav ? "checked" : ""}><span class="sl"></span></label></div>
-    <div class="field"><label>Illustration</label>
-      <div id="artPick" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
-        ${ART_KEYS.map(k => `<button type="button" class="chip" data-art="${k}"
-          style="padding:4px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:12px">
-          <span style="width:100%;height:100%;display:block;color:${e.art === k ? "#06101c" : "var(--accent2)"}">${art(k)}</span></button>`).join("")}
-      </div></div>
+    <div class="hint" style="margin-top:-8px">Both zero = open-ended stopwatch. Intensity, load,
+      cadence, speed, sets and the beeps are all on the new exercise's <b>⚙️ Setup</b> tab,
+      where they save as you type.</div>
     <div class="btnrow">
       <button class="btn sec" id="exCancel">Cancel</button>
-      <button class="btn" id="exSave">${isNew ? "Create" : "Save"}</button>
-    </div>
-    ${isNew ? "" : `<button class="btn danger" id="exDel" style="margin-top:8px">Delete exercise</button>`}`, () => {
-    let picked = e.art;
-    const repaint = () => $("artPick").querySelectorAll("[data-art]").forEach(b => {
-      const on = b.dataset.art === picked;
-      b.classList.toggle("on", on);
-      b.firstElementChild.style.color = on ? "#06101c" : "var(--accent2)";
-    });
-    repaint();
-    $("artPick").querySelectorAll("[data-art]").forEach(b => b.onclick = () => { picked = b.dataset.art; repaint(); });
+      <button class="btn" id="exSave">Create</button>
+    </div>`, () => {
+    // read the form back out, so the picker detour can't cost a typed name
+    const draftNow = () => ({ name: $("exName").value, cat: $("exCat").value, art: e.art,
+      dur: (+$("exMin").value || 0) * 60 + (+$("exSec").value || 0) });
+    $("exArt").onclick = () => {
+      const d = draftNow();
+      pickArt(e.art, k => newExercise(Object.assign(d, { art: k })));
+    };
     $("exCancel").onclick = closeSheet;
     $("exSave").onclick = () => {
-      const name = $("exName").value.trim();
+      const d = draftNow(), name = d.name.trim();
       if (!name) { toast("Name it first", "err"); return; }
-      const dur = (+$("exMin").value || 0) * 60 + (+$("exSec").value || 0);
-      const patch = { name, cat: $("exCat").value, dur, art: picked, fav: $("exFav").checked,
-        note: $("exNote").value.trim(),
-        met: Math.max(1, +$("exMet").value || CAT_MET[$("exCat").value] || 4),
-        load: Math.max(0, fromDisplayW(+$("exLoad").value || 0)),
-        rate: Math.max(0, +$("exRate").value || 0),
-        kmh: Math.max(0, +$("exKmh").value || 0) };
-      if (isNew) DB.exercises.push(Object.assign({ id: uid("ex"), ord: DB.exercises.length, arch: false }, patch));
-      else Object.assign(ex, patch);
+      const cat = d.cat, dur = d.dur;
+      const ex = { id: uid("ex"), name, cat, dur, art: e.art, fav: false, note: "",
+        ord: DB.exercises.length, arch: false, met: CAT_MET[cat] || 4, load: 0, rate: 0, kmh: 0,
+        sets: 1, setRest: 60, lead: DEF_LEAD, gps: false, cues: Object.assign({}, DEF_CUES) };
+      DB.exercises.push(ex);
       save(true); closeSheet(); renderAll();
-      if (exViewId) { $("evTitle").textContent = patch.name; paintExercise(); }
-      toast(isNew ? "Created" : "Saved");
-    };
-    if (!isNew) $("exDel").onclick = () => {
-      const used = DB.logs.filter(l => l.exId === ex.id).length;
-      if (!confirm(used ? `Delete "${ex.name}"? Its ${used} logged session${used === 1 ? "" : "s"} stay in history.` : `Delete "${ex.name}"?`)) return;
-      snapshotForUndo("delete exercise");
-      ex.arch = true;                                    // soft-delete keeps history joins intact
-      DB.routines.forEach(r => r.items = r.items.filter(i => i !== ex.id));
-      save(true); closeSheet(); closeExercise(); renderAll(); offerUndo(`Deleted ${ex.name}`);
+      toast("Created");
+      // straight into its own page, on Setup, which is where the rest of it lives
+      openExercise(ex.id); showExTab("setup");
     };
   });
 }
@@ -5539,7 +5877,7 @@ function boot() {
   $("nav").querySelectorAll("button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
   // the + means "one more of what this tab is about"
-  $("fab").onclick = () => (tab === "goals" ? editGoal(null) : editExercise(null));
+  $("fab").onclick = () => (tab === "goals" ? editGoal(null) : newExercise());
   $("goExercises").onclick = () => showTab("ex");
   $("goReview").onclick = () => showTab("history");
   $("editToday").onclick = () => openDayEdit(todayStr());
@@ -5562,7 +5900,6 @@ function boot() {
   $("scClose").onclick = () => $("streakCal").classList.remove("show");
   $("dmClose").onclick = () => $("dayModal").classList.remove("show");
   $("evBack").onclick = closeExercise;
-  $("evEdit").onclick = () => editExercise(exById(exViewId));
 
   // tapping the dimmed backdrop closes a sheet
   ["streakCal", "dayModal", "sheetModal"].forEach(id =>
