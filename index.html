@@ -198,6 +198,9 @@
   .streakrow{display:flex;gap:8px;}
   .stat{flex:1;min-width:0;background:var(--card2);border-radius:14px;padding:13px 6px;text-align:center;}
   .stat .n{font-size:clamp(18px,6.4vw,28px);font-weight:800;line-height:1.05;white-space:nowrap;}
+  /* an icon above the number, not beside it: three stats share a phone row and
+     the number must stay on one line whatever the emoji is worth */
+  .stat .sic{font-size:16px;line-height:1;margin-bottom:3px;}
   .stat .n small{font-size:.5em;color:var(--muted);font-weight:600;}
   .stat .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:5px;line-height:1.2;}
 
@@ -457,12 +460,29 @@
   /* the pinned Start is the whole point of the page — double height, and big
      enough type that its label reads from the same distance as the runner's clock */
   .fpage .pfoot .btn{margin:0;min-height:98px;font-size:19px;border-radius:16px;}
+  /* Setup is a dozen fields deep on a 384px phone, so its rows are a third
+     shorter than the app's default: less padding, a label that sits closer to
+     its box, and less air between rows. The type stays 16px — anything smaller
+     and a phone zooms the page the moment a field takes focus. */
+  #exView .field{margin-bottom:9px;}
+  #exView .field label{margin-bottom:2px;}
+  #exView .field input,#exView .field select{padding:6px 10px;}
+  /* a question mark that trails a label without changing its height */
+  .qbtn{margin-left:5px;width:16px;height:16px;padding:0;border-radius:50%;border:1px solid var(--line);
+    background:var(--card2);color:var(--muted);font-size:11px;font-weight:700;line-height:1;
+    cursor:pointer;vertical-align:middle;}
   .durbig{text-align:center;font-size:46px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-1px;}
   /* four fixed steps rather than two adaptive ones — a tap is always worth what
      the button says, whatever the dial currently reads */
   .durrow{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;}
   .durrow button{flex:1 1 0;min-width:0;max-width:78px;height:44px;border-radius:12px;border:1px solid var(--line);
     background:var(--card2);color:var(--txt);font-size:15px;font-weight:700;cursor:pointer;}
+  /* The presets are the fastest way to set the dial, so they are targets rather
+     than labels: as tall as the steppers above them, with the gap down to 4px so
+     all six still fit across a 384px phone in one row. */
+  .durpre{display:flex;gap:4px;margin-top:10px;}
+  .durpre .chip{flex:1 1 0;min-width:0;height:44px;padding:0 2px;border-radius:12px;
+    display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:700;}
 
   /* ---- runner (full-screen timer) ---- */
   .runner{position:fixed;inset:0;z-index:80;background:var(--bg);display:flex;flex-direction:column;
@@ -951,12 +971,14 @@
     <button role="tab" data-extab="setup" aria-selected="false" aria-label="Setup"><i>⚙️</i>Setup</button>
   </div>
   <div class="pbody" id="evScroll"><div class="wrapin" id="evBody"></div></div>
-  <div class="pfoot"><div class="wrapin"><button class="btn" id="evStart">Start</button></div></div>
+  <!-- Start belongs to the timer tab and is hidden on the other two, which gives
+       the record and the setup the whole height of the screen -->
+  <div class="pfoot" id="evFoot"><div class="wrapin"><button class="btn" id="evStart">Start</button></div></div>
 </div>
 
 <script>
 "use strict";
-const APP_VERSION = "26";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "27";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2738,6 +2760,20 @@ function goalMedalRuns(g, exercises, rows) {
   }
   return out;
 }
+/* The medal run this exercise is part of, or null when it feeds no goal. The
+   strongest tier still running, since the weaker ones are implied — the same
+   choice the app-wide tile makes, and for the same reason: three weeks of
+   silver is three weeks of bronze as well. Nothing running reads as bronze at
+   zero, the run you have yet to start. One goal is named even when the exercise
+   is in several: the tile is a third of a row wide, not a report. */
+function exGoalMedal(e) {
+  const g = liveGoals().find(x => goalExIds(x, DB.exercises).includes(e.id));
+  if (!g) return null;
+  const runs = goalMedalRuns(g, DB.exercises, DB.logs);
+  const m = MEDALS.find(x => runs[x.k].cur > 0) || MEDAL.bronze;
+  return { g, m, ...runs[m.k] };
+}
+
 /* The week's medal is the *weakest* one its goals earned: gold means every goal
    went gold, and a single goal left at bronze caps the whole week at bronze. One
    goal missed outright and the week has no medal at all — which is the same test
@@ -4835,9 +4871,11 @@ function paintExercise() {
   if (exTab === "track") paintExTrack(e, mine);
   else if (exTab === "setup") paintExSetup(e, mine);
   else paintExTimer(e);
-  /* Start is pinned on every tab, and its label is computed here rather than in
-     the timer tab, because sets and rest now live in Setup: the button has to
-     read "× 3" while the field that says 3 is on another tab entirely. */
+  /* Start is the timer tab's button, not the page's: on Record and Setup it is
+     nothing but 98px of screen you can't scroll. Its label is still computed
+     here rather than in the timer tab, because sets and rest live in Setup —
+     changing the count there has to move the number the timer's button reads. */
+  $("evFoot").style.display = exTab === "timer" ? "" : "none";
   evStartLabel(e);
   $("evStart").onclick = () => {
     // the dial is the one thing still uncommitted — everything else in Setup
@@ -4873,7 +4911,7 @@ function paintExTimer(e) {
         <button id="evPlus">+15s</button>
         <button id="evPlus1">+1m</button>
       </div>
-      <div class="chips" style="justify-content:center;margin-top:12px">
+      <div class="durpre">
         ${[30, 60, 120, 300, 600, 0].map(s =>
           `<span class="chip" data-setdur="${s}">${s ? durLabel(s) : "open"}</span>`).join("")}
       </div>
@@ -4881,11 +4919,12 @@ function paintExTimer(e) {
       <div class="hint" id="evPlan" style="text-align:center"></div>
       ${/* what pressing Start is about to sound like, on the tab where you press
              it — the switches themselves are one tap away in Setup */""}
-      <div class="hint" style="text-align:center">Beeps: <b id="evCueSum">${
+      <div class="hint" style="text-align:center;margin-bottom:0">Beeps: <b id="evCueSum">${
         cueSummary(e)}</b>${e.gps ? " · GPS on" : ""}</div>
-      <div class="hint" style="text-align:center;margin-top:2px;margin-bottom:0">Sets, rest,
-        count-in and the switches are in <b>⚙️ Setup</b>. Starting saves this length.</div>
-    </div>`;
+    </div>
+    ${/* the session you forgot to time is still a session, and this is the tab
+           you land on when you remember it */""}
+    <button class="btn sec" id="evLogManual">Log without the timer</button>`;
   const lab = () => {
     $("evDurLab").textContent = evDur ? mmss(evDur) : "open";
     const kg = latestWeightKg();
@@ -4913,6 +4952,7 @@ function paintExTimer(e) {
   $("evPlus1").onclick = () => bump(60);
   $("evBody").querySelectorAll("[data-setdur]").forEach(c =>
     c.onclick = () => { evDur = +c.dataset.setdur; lab(); });
+  $("evLogManual").onclick = () => manualLog(e.id);
 }
 
 /* ---- tab 2: the record ----
@@ -4925,20 +4965,29 @@ function paintExTrack(e, mine) {
   const thisMonth = mine.filter(l => l.date >= mr.from && l.date <= mr.to);
   const best = mine.reduce((m, l) => Math.max(m, l.secs), 0);
   const st = exStreaks(mine);
+  const gm = exGoalMedal(e);
   $("evBody").innerHTML = `
     <div class="card" style="margin-top:0">
       <h2>Streak</h2>
       ${/* two runs, not one: a nightly plank lives on the day count and a
              twice-a-week press only ever reads 1 there — see exStreaks */""}
       <div class="streakrow">
-        <div class="stat"><div class="n">${st.day.cur}<small>d</small></div><div class="l">days in a row</div></div>
-        <div class="stat"><div class="n">${st.week.cur}<small>w</small></div><div class="l">weeks in a row</div></div>
-        <div class="stat"><div class="n">${st.weeks}</div><div class="l">weeks trained</div></div>
+        <div class="stat"><div class="sic">🔥</div><div class="n">${st.day.cur}<small>d</small></div><div class="l">days in a row</div></div>
+        <div class="stat"><div class="sic">📆</div><div class="n">${st.week.cur}<small>w</small></div><div class="l">weeks in a row</div></div>
+        ${/* the third slot is the goal's medal run when this exercise feeds one:
+               "silver for nine weeks" is the thing you are actually defending, and
+               it is invisible on the app-wide tile that any one weak goal caps */""}
+        ${gm
+          ? `<div class="stat"><div class="sic">${gm.m.ic}</div><div class="n">${gm.cur}<small>w</small></div>
+              <div class="l">${gm.m.lbl} weeks</div></div>`
+          : `<div class="stat"><div class="sic">✅</div><div class="n">${st.weeks}</div><div class="l">weeks trained</div></div>`}
       </div>
       <div class="hint" style="margin-bottom:0">${mine.length
         ? `Best run ${st.day.best} day${st.day.best === 1 ? "" : "s"} · ${st.week.best} week${
             st.week.best === 1 ? "" : "s"} · last done ${relDay(mine[0].ts)}`
-        : "Nothing logged yet — the first session starts both runs."}</div>
+        : "Nothing logged yet — the first session starts both runs."}${gm
+        ? ` · ${gm.m.ic} weeks come from your ${esc(gm.g.name)} goal, best ${gm.best}`
+        : ""}</div>
     </div>
 
     <div class="card">
@@ -4980,7 +5029,7 @@ function paintExTrack(e, mine) {
                          reps: e.art === "jumprope" ? "jumps" : "reps done" };
         return `<div class="hint" style="margin-top:0">${ms.totalTxt} — ${nameOf[ms.key]}${
           ms.key === "time" && exMetricKey(e) === "time" && !(e.rate > 0) && !(e.kmh > 0)
-            ? ". Give this one a cadence, load or speed in ⚙️ Setup to count reps, tonnes or kilometres instead." : "."}
+            ? ". Give this one a cadence, load or speed in ⚙️ Setup to count reps, tonnes or kilometres instead." : "."}</div>
         <div class="badgegrid">${ms.list.map(x => `
           <div class="badge ${x.earned ? "on" : ""}">
             <div class="bic">${x.ic}</div>
@@ -5033,13 +5082,10 @@ function paintExTrack(e, mine) {
             <span class="chip" aria-hidden="true">✎</span></div>`;
           }).join("")
         : `<div class="empty">No sessions yet.</div>`}</div>
-    </div>
-
-    <button class="btn sec" id="evLogManual">Log without the timer</button>`;
+    </div>`;
   renderExCal(e, mine);
   $("evCalPrev").onclick = () => { exCalMonth.setMonth(exCalMonth.getMonth() - 1); renderExCal(e, mine); };
   $("evCalNext").onclick = () => { exCalMonth.setMonth(exCalMonth.getMonth() + 1); renderExCal(e, mine); };
-  $("evLogManual").onclick = () => manualLog(e.id);
   bindLogLines($("evLogs"));
 }
 /* This exercise's own month, in the same grid the streak calendar uses so a day
@@ -5130,12 +5176,14 @@ function paintExSetup(e, mine) {
               `<option value="${c.id}" ${c.id === e.cat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select></div>
         </div>
       </div>
-      <div class="hint" style="margin-bottom:14px">Tap the picture to change it. Everything on
-        this tab saves itself — there is no Save button.</div>
-      <div class="field"><label for="seNote">Note (form cue, tempo…)</label>
+      <div class="field" style="margin-top:12px"><label for="seNote">Note (form cue, tempo…)</label>
         <input id="seNote" value="${esc(e.note || "")}" autocomplete="off"></div>
       <div class="btnrow">
-        <div class="field" style="flex:1"><label for="seMet">Intensity (MET)</label>
+        ${/* four numbers that all need the same paragraph of explaining, and a
+               paragraph is not what you want in front of the fields every time
+               you come to fix one — so it is behind the ? */""}
+        <div class="field" style="flex:1"><label for="seMet">Intensity (MET)<button
+          type="button" class="qbtn" id="seMetHelp" aria-label="What these numbers mean">?</button></label>
           <input type="number" id="seMet" min="1" max="20" step="0.1" value="${e.met || CAT_MET[e.cat] || 4}"></div>
         <div class="field" style="flex:1"><label for="seLoad">Load (${wUnit()}, optional)</label>
           <input type="number" id="seLoad" min="0" step="0.5" value="${e.load ? Math.round(toDisplayW(e.load) * 10) / 10 : ""}"></div>
@@ -5146,12 +5194,6 @@ function paintExSetup(e, mine) {
         <div class="field" style="flex:1"><label for="seKmh">Speed — km/h</label>
           <input type="number" id="seKmh" min="0" max="40" step="0.1" value="${e.kmh || ""}"></div>
       </div>
-      <div class="hint" style="margin-top:-8px">MET is the published metabolic cost of the
-        activity and drives the calorie estimate — 3.5 is light resistance work, 8 is
-        vigorous, 11.8 is a moderate rope pace. For rope exercises a cadence picks the
-        MET band for you (&lt;100/min 8.8, 100–120 11.8, 120+ 12.3). Load is tracked for
-        progression; it doesn't inflate the estimate. A speed turns minutes into kilometres
-        for the milestones.</div>
       <div class="field toggle" style="margin-bottom:0"><span>Show in Today's routine</span>
         <label class="switch"><input type="checkbox" id="seFav" ${e.fav ? "checked" : ""}><span class="sl"></span></label></div>
     </div>
@@ -5235,6 +5277,14 @@ function paintExSetup(e, mine) {
     $("evCat").innerHTML = `<span class="dot" style="background:${catColor(e.cat)}"></span>${esc(catName(e.cat))}`;
     renderToday(); renderExList();
   };
+  $("seMetHelp").onclick = () => openSheet(`<h3>Intensity, load, cadence and speed</h3>
+    <div class="bsd">MET is the published metabolic cost of the activity and drives the calorie
+      estimate — 3.5 is light resistance work, 8 is vigorous, 11.8 is a moderate rope pace.
+      For rope exercises a cadence picks the MET band for you (&lt;100/min 8.8, 100–120 11.8,
+      120+ 12.3). Load is tracked for progression; it doesn't inflate the estimate. A speed
+      turns minutes into kilometres for the milestones.</div>
+    <div class="btnrow" style="margin-top:16px"><button class="btn" id="bsOk">Got it</button></div>`,
+    () => { $("bsOk").onclick = closeSheet; });
   num("seMet", v => e.met = Math.max(1, v || CAT_MET[e.cat] || 4), 1, 20, () => e.met);
   num("seLoad", v => e.load = fromDisplayW(v), 0, 1000);
   num("seRate", v => e.rate = v, 0, 400);
