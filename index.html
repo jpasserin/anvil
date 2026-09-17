@@ -554,6 +554,23 @@
      the go/no-go row needs — you are standing still and aiming by now */
   .rctl.conf{margin-top:22px;}
   .rctl.conf button{min-height:58px;font-size:16px;}
+  /* the rep count sits under the seconds because it is derived from them, and it
+     is a typable field rather than only ± steps: 143 jumps is a number you
+     counted, not one you can reach in ±5s from an estimate */
+  .confreps{display:flex;gap:8px;align-items:stretch;margin-top:10px;}
+  .confreps button{flex:0 0 58px;min-height:52px;font-size:16px;font-weight:700;
+    border-radius:14px;border:1px solid var(--line);background:var(--card2);
+    color:var(--txt);cursor:pointer;}
+  .confreps .rv{flex:1 1 auto;display:flex;align-items:baseline;justify-content:center;
+    gap:7px;padding:6px 10px;border-radius:14px;background:var(--card2);
+    border:1px solid var(--line);}
+  .confreps input{width:3.6em;min-width:0;padding:0;text-align:right;border:0;
+    background:none;color:var(--txt);font:800 26px/1.2 inherit;
+    font-variant-numeric:tabular-nums;}
+  .confreps input:focus{outline:none;color:var(--accent);}
+  .confreps input::-webkit-outer-spin-button,
+  .confreps input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+  .confreps .rv span{font-size:13px;font-weight:700;color:var(--muted);}
   /* the whole point of the screen popping up is that you SEE this */
   .mileban{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding:13px 14px;
     border-radius:16px;background:linear-gradient(135deg,#3a2f14,#221c0e);
@@ -978,7 +995,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "28";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "29";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2183,6 +2200,31 @@ const repsAreEstimated = l => !(l.reps > 0) && repsOf(l) > 0;
 const volumeKgOf = l => repsOf(l) * (l.load || 0);
 const volumeOfLogs = rows => rows.reduce((s, l) => s + volumeKgOf(l), 0);
 
+/* The cadence to *offer* at the end of a set, which is not the same thing as the
+   cadence written on the exercise. That one is a setting you typed once; this one
+   is what you have actually been doing lately, and it is the better guess by the
+   second session. Total reps over total minutes rather than a mean of per-set
+   rates, so one 20-second burst can't outvote ten minutes of work.
+
+   Only sessions with a real count vote — an estimate voting for the next estimate
+   would just be the nominal rate wearing a disguise. With nothing to go on it
+   falls back to the exercise's own number, which is exactly what it is for. */
+const REPS_AVG_N = 5;             // "the last few": enough to smooth a bad day,
+                                  // few enough to follow a change in pace
+function repsCadence(exId, rows, n) {
+  const ex = exById(exId);
+  const counted = rows.filter(l => l.exId === exId && l.reps > 0 && l.secs > 0)
+    .slice().sort((a, b) => (b.ts || 0) - (a.ts || 0))
+    .slice(0, n == null ? REPS_AVG_N : n);
+  if (!counted.length) return { rate: ex && ex.rate > 0 ? ex.rate : 0, from: 0 };
+  const reps = counted.reduce((s, l) => s + l.reps, 0);
+  const secs = counted.reduce((s, l) => s + l.secs, 0);
+  return { rate: Math.round(reps / (secs / 60) * 10) / 10, from: counted.length };
+}
+const repsFor = (cad, secs) => Math.max(0, Math.round((cad || 0) * (secs || 0) / 60));
+// a rope does jumps, everything else does reps — one rule, not one per screen
+const repsWord = ex => (ex && ex.art === "jumprope" ? "jumps" : "reps");
+
 /* ---- per-exercise milestones ----
    Every exercise piles something up, but not the same something: rope work
    counts jumps, a walk counts kilometres, a dumbbell counts tonnes off the
@@ -2249,7 +2291,7 @@ function milestoneGained(ex, rows, provisional) {
   /* reps is the one metric whose fmt is a bare number, because everywhere else it
      is read next to a heading that says what is being counted. The banner is not:
      "Milestone — 1k" doesn't say 1k of what, so the noun is added back here. */
-  const noun = key === "reps" ? " " + (ex.art === "jumprope" ? "jumps" : "reps") : "";
+  const noun = key === "reps" ? " " + repsWord(ex) : "";
   return { key, goal, ic: m.ic, label: m.fmt(goal) + noun, also: crossed.length - 1,
            total: after, totalTxt: m.fmt(after) + noun };
 }
@@ -3078,10 +3120,27 @@ function finishCurrent() {
   if (!RUN.paused) { RUN.elapsed = elapsedNow(); RUN.paused = true; }
   // gpsKm is kept alongside km so discarding an implausible measurement is
   // reversible — km is what gets logged, gpsKm is what the watch actually said
-  RUN.pending = { secs: Math.max(0, secs), km: geoKm(), gpsKm: geoKm(), trimmed: raw - secs,
-                  beganAt: RUN.beganAt || RUN.startedAt };
+  RUN.pending = Object.assign({ secs: Math.max(0, secs), km: geoKm(), gpsKm: geoKm(),
+                                trimmed: raw - secs, beganAt: RUN.beganAt || RUN.startedAt },
+                              pendingReps(RUN.exId, Math.max(0, secs)));
   RUN.pendMin = Math.floor(pendingWall() / 60);
   renderRunner();
+}
+/* A set of a cadence exercise arrives at the confirm screen with a rep count on
+   it, offered the same way the seconds are: derived, visible, and yours to
+   correct before anything is logged. `cad` is remembered so a correction to the
+   seconds rescales the reps, and `repsSet` so it stops doing that the moment you
+   type a real count — at which point the number is a measurement, not a guess. */
+function pendingReps(exId, secs) {
+  const ex = exById(exId);
+  if (!ex || !(ex.rate > 0)) return { cad: 0, from: 0, reps: 0, repsSet: false };
+  const c = repsCadence(exId, DB.logs);
+  return { cad: c.rate, from: c.from, reps: repsFor(c.rate, secs), repsSet: false };
+}
+// the reps follow the seconds until you take charge of them
+function syncPendingReps() {
+  const p = RUN.pending;
+  if (p && p.cad > 0 && !p.repsSet) p.reps = repsFor(p.cad, p.secs);
 }
 /* How long ago this set actually started, by the clock on the wall. The timer's
    own number can legitimately be smaller — a pause, or a Done pressed late and
@@ -3095,6 +3154,7 @@ function pendingWall() {
 function fillPending() {
   if (!RUN.pending) return;
   RUN.pending.secs = Math.max(RUN.pending.secs, pendingWall());
+  syncPendingReps();
   renderRunner();
 }
 /* Throw away a measured distance that can't be right and fall back to the
@@ -3117,7 +3177,43 @@ function keepPendingDistance() {
 function bumpPending(sec) {
   if (!RUN.pending) return;
   RUN.pending.secs = Math.max(0, RUN.pending.secs + sec);
+  syncPendingReps();
   renderRunner();
+}
+// ±5 reps is the "I lost count near the end" correction; a real count gets typed
+function bumpPendingReps(n) {
+  if (!RUN.pending) return;
+  RUN.pending.reps = Math.max(0, Math.min(9999, RUN.pending.reps + n));
+  RUN.pending.repsSet = true;
+  renderRunner();
+}
+function setPendingReps(n) {
+  if (!RUN.pending) return;
+  RUN.pending.reps = Math.max(0, Math.min(9999, Math.round(n) || 0));
+  RUN.pending.repsSet = true;
+  saveRun();     // throttled: a count typed and not yet blurred is still worth keeping
+  paintRepsHint();
+}
+/* Painted rather than re-rendered, because it changes on every keystroke in the
+   field and re-rendering would take the caret with it. Untouched, the line says
+   where the offered number came from — a default you can't audit is one you
+   either trust blindly or delete. Touched, it says the cadence you just claimed,
+   which is the number that will be feeding the next session's default. */
+function paintRepsHint() {
+  const el = $("pRepsHint"), p = RUN.pending;
+  if (!el || !p) return;
+  const ex = exById(RUN.exId), bits = [];
+  if (p.repsSet) {
+    const got = p.secs > 0 ? Math.round(p.reps / (p.secs / 60)) : 0;
+    bits.push(got > 0 ? `${got}/min on this set` : "your count");
+  } else if (p.from > 0) {
+    bits.push(`${p.cad}/min — your average over the last ${p.from} session${
+      p.from > 1 ? "s" : ""}`);
+  } else {
+    bits.push(`${p.cad}/min — the cadence set on this exercise`);
+  }
+  if (ex && ex.load > 0 && p.reps > 0) bits.push(`${Math.round(p.reps * ex.load)} kg lifted`);
+  el.textContent = bits.join(" · ");
 }
 function cancelPending() {
   if (!RUN.pending) return;
@@ -3130,9 +3226,11 @@ function cancelPending() {
 }
 function commitPending() {
   if (!RUN.pending) return;
-  const { secs, km } = RUN.pending;
+  const { secs, km, cad, reps } = RUN.pending;
   RUN.pending = null;
-  if (secs >= 3) logEntry(RUN.exId, secs, null, km);      // ignore accidental taps
+  // the reps go in as a real count, because you were shown them and kept them —
+  // deriving them again later from a nominal rate would contradict the screen
+  if (secs >= 3) logEntry(RUN.exId, secs, null, km, cad > 0 ? reps : 0);
   const last = RUN.idx >= RUN.queue.length - 1;
   // only the end of the whole session goes to Today — doing it mid-queue would
   // walk out of a session you are three sets into
@@ -3195,7 +3293,12 @@ function runSnapshot() {
     resting: !!RUN.resting, over: !!RUN.over, km: geoKm(),
     pending: RUN.pending ? { secs: RUN.pending.secs, km: RUN.pending.km,
                              gpsKm: RUN.pending.gpsKm, trimmed: RUN.pending.trimmed,
-                             beganAt: RUN.pending.beganAt } : null
+                             beganAt: RUN.pending.beganAt,
+                             // a typed rep count is the one thing on this screen
+                             // that cannot be recomputed, so it travels with it
+                             cad: RUN.pending.cad || 0, from: RUN.pending.from || 0,
+                             reps: RUN.pending.reps || 0,
+                             repsSet: !!RUN.pending.repsSet } : null
   };
 }
 function saveRun(force) {
@@ -3240,8 +3343,15 @@ function resumeRun() {
     // wall clock next to it and logs neither number without a tap
     RUN.paused = true; RUN.armed = false; RUN.elapsed = secs;
     RUN.startedAt = Date.now() - secs * 1000;
-    RUN.pending = { secs: Math.round(secs), km: rec.km, gpsKm: rec.km, trimmed: 0,
-                    beganAt: RUN.beganAt, lastBeat: snap.savedAt, recovered: true };
+    RUN.pending = Object.assign(pendingReps(RUN.exId, Math.round(secs)),
+                    { secs: Math.round(secs), km: rec.km, gpsKm: rec.km, trimmed: 0,
+                      beganAt: RUN.beganAt, lastBeat: snap.savedAt, recovered: true });
+    // a count you already typed outranks the one the cadence would offer again
+    const sp = snap.pending;
+    if (sp && sp.repsSet && sp.cad > 0) {
+      RUN.pending.cad = sp.cad; RUN.pending.from = sp.from || 0;
+      RUN.pending.reps = sp.reps || 0; RUN.pending.repsSet = true;
+    }
     RUN.pendMin = Math.floor(pendingWall() / 60);
   } else if (snap.paused || snap.armed || snap.leading || snap.resting) {
     RUN.paused = !!snap.paused; RUN.armed = !snap.paused;
@@ -3300,8 +3410,12 @@ function renderPending() {
   const r = $("runner"), p = RUN.pending;
   const ex = exById(RUN.exId) || { name: "?", cat: "", art: "generic" };
   const mine = DB.logs.filter(l => l.exId === RUN.exId);
+  // the milestone preview has to count the reps on the screen, not the ones a
+  // nominal rate would have implied — otherwise editing the number down still
+  // promises a medal the log won't award
   const prov = { exId: RUN.exId, secs: p.secs, km: p.km, load: ex.load || 0,
-                 rate: ex.rate || 0, met: exerciseMet(ex), date: todayStr() };
+                 rate: ex.rate || 0, reps: p.cad > 0 ? p.reps : 0,
+                 met: exerciseMet(ex), date: todayStr() };
   const gain = milestoneGained(ex, mine, prov);
   const last = RUN.idx >= RUN.queue.length - 1;
   const kg = latestWeightKg();
@@ -3350,6 +3464,13 @@ function renderPending() {
         <button id="pP1">+1s</button>
         <button id="pP5">+5s</button>
       </div>
+      ${p.cad > 0 ? `<div class="confreps">
+        <button id="pRM" aria-label="five fewer">−5</button>
+        <div class="rv"><input type="number" id="pReps" inputmode="numeric" min="0" max="9999"
+          value="${p.reps}"><span>${repsWord(ex)}</span></div>
+        <button id="pRP" aria-label="five more">+5</button>
+      </div>
+      <div class="hint" id="pRepsHint" style="text-align:center;margin:7px 0 0"></div>` : ""}
       ${gapSecs >= 60 ? `<div class="sban">
         <div class="sh">⏱ ${mmss(gapSecs)} ${p.recovered ? "went unrecorded" : "isn't on the clock"}</div>
         <div class="ss">${p.recovered
@@ -3394,6 +3515,15 @@ function renderPending() {
   if ($("pDropKm")) $("pDropKm").onclick = dropPendingDistance;
   if ($("pKeepKm")) $("pKeepKm").onclick = keepPendingDistance;
   if ($("pFillWall")) $("pFillWall").onclick = fillPending;
+  if ($("pReps")) {
+    $("pRM").onclick = () => bumpPendingReps(-5);
+    $("pRP").onclick = () => bumpPendingReps(5);
+    // oninput must NOT re-render: the caret is inside the field being typed into.
+    // onchange (blur / Enter) is where the milestone banner is allowed to reflow.
+    $("pReps").oninput = e => setPendingReps(+e.target.value);
+    $("pReps").onchange = () => renderRunner();
+    paintRepsHint();
+  }
   saveRun(true);       // the number on this screen is worth surviving a reload too
 }
 function renderRunner() {
@@ -3530,7 +3660,7 @@ function paintRunner() {
 }
 
 /* ===================== logging ===================== */
-function logEntry(exId, secs, when, km) {
+function logEntry(exId, secs, when, km, reps) {
   const ex = exById(exId);
   if (!ex) return;
   const d = when ? new Date(when) : new Date();
@@ -3538,7 +3668,10 @@ function logEntry(exId, secs, when, km) {
   DB.logs.push({
     id: uid("lg"), exId, name: ex.name, cat: ex.cat, art: ex.art,
     date: ymd(d), ts: d.getTime(), secs: Math.round(secs),
-    met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, reps: 0, note: "",
+    met: exerciseMet(ex), load: ex.load || 0, rate: ex.rate || 0, note: "",
+    // 0 leaves the count to be derived from the cadence; anything else is a
+    // number that was on a screen in front of you before it went in
+    reps: reps > 0 ? Math.round(reps) : 0,
     // only present when GPS actually measured something, so `l.km > 0` is a
     // reliable "this distance is real, not derived from a nominal pace"
     km: km > 0 ? Math.round(km * 1000) / 1000 : 0
@@ -4614,7 +4747,7 @@ function progressCard(ex, rows) {
   const tr = exTrend(ex, rows, 4);
   const peak = Math.max(...weeks.map(w => w.val));
   const nameOf = { dist: "per week", vol: "lifted per week", time: "per week",
-                   reps: ex.art === "jumprope" ? "jumps per week" : "reps per week" };
+                   reps: repsWord(ex) + " per week" };
   const W = 300, H = 96, gap = 3;
   const bw = (W - gap * (weeks.length - 1)) / weeks.length;
   const bars = weeks.map((w, i) => {
@@ -5236,9 +5369,8 @@ function paintExTrack(e, mine) {
       <h2>Milestones</h2>
       ${(() => {
         const ms = exMilestones(e, mine);
-        // rope work counts jumps; everything else with a cadence counts reps
         const nameOf = { dist: "distance covered", vol: "total lifted", time: "time held",
-                         reps: e.art === "jumprope" ? "jumps" : "reps done" };
+                         reps: repsWord(e) + " done" };
         return `<div class="hint" style="margin-top:0">${ms.totalTxt} — ${nameOf[ms.key]}${
           ms.key === "time" && exMetricKey(e) === "time" && !(e.rate > 0) && !(e.kmh > 0)
             ? ". Give this one a cadence, load or speed in ⚙️ Setup to count reps, tonnes or kilometres instead." : "."}</div>
