@@ -557,15 +557,17 @@
   /* the rep count sits under the seconds because it is derived from them, and it
      is a typable field rather than only ± steps: 143 jumps is a number you
      counted, not one you can reach in ±5s from an estimate */
-  .confreps{display:flex;gap:8px;align-items:stretch;margin-top:10px;}
-  .confreps button{flex:0 0 58px;min-height:52px;font-size:16px;font-weight:700;
+  /* four steps like the seconds row above it, so the two read as the same
+     control: ±1 is the miscount, ±5 is the lost-count-near-the-end */
+  .confreps{display:flex;gap:7px;align-items:stretch;margin-top:10px;}
+  .confreps button{flex:0 0 44px;min-height:52px;font-size:15px;font-weight:700;
     border-radius:14px;border:1px solid var(--line);background:var(--card2);
     color:var(--txt);cursor:pointer;}
   .confreps .rv{flex:1 1 auto;display:flex;align-items:baseline;justify-content:center;
-    gap:7px;padding:6px 10px;border-radius:14px;background:var(--card2);
+    gap:6px;padding:6px 8px;border-radius:14px;background:var(--card2);
     border:1px solid var(--line);}
-  .confreps input{width:3.6em;min-width:0;padding:0;text-align:right;border:0;
-    background:none;color:var(--txt);font:800 26px/1.2 inherit;
+  .confreps input{width:3.2em;min-width:0;padding:0;text-align:right;border:0;
+    background:none;color:var(--txt);font:800 24px/1.2 inherit;
     font-variant-numeric:tabular-nums;}
   .confreps input:focus{outline:none;color:var(--accent);}
   .confreps input::-webkit-outer-spin-button,
@@ -995,7 +997,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "29";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "30";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -3180,7 +3182,7 @@ function bumpPending(sec) {
   syncPendingReps();
   renderRunner();
 }
-// ±5 reps is the "I lost count near the end" correction; a real count gets typed
+// ±1 is the miscount, ±5 is "I lost count near the end"; a real count gets typed
 function bumpPendingReps(n) {
   if (!RUN.pending) return;
   RUN.pending.reps = Math.max(0, Math.min(9999, RUN.pending.reps + n));
@@ -3465,10 +3467,12 @@ function renderPending() {
         <button id="pP5">+5s</button>
       </div>
       ${p.cad > 0 ? `<div class="confreps">
-        <button id="pRM" aria-label="five fewer">−5</button>
+        <button id="pRM5" aria-label="five fewer">−5</button>
+        <button id="pRM1" aria-label="one fewer">−1</button>
         <div class="rv"><input type="number" id="pReps" inputmode="numeric" min="0" max="9999"
           value="${p.reps}"><span>${repsWord(ex)}</span></div>
-        <button id="pRP" aria-label="five more">+5</button>
+        <button id="pRP1" aria-label="one more">+1</button>
+        <button id="pRP5" aria-label="five more">+5</button>
       </div>
       <div class="hint" id="pRepsHint" style="text-align:center;margin:7px 0 0"></div>` : ""}
       ${gapSecs >= 60 ? `<div class="sban">
@@ -3516,8 +3520,10 @@ function renderPending() {
   if ($("pKeepKm")) $("pKeepKm").onclick = keepPendingDistance;
   if ($("pFillWall")) $("pFillWall").onclick = fillPending;
   if ($("pReps")) {
-    $("pRM").onclick = () => bumpPendingReps(-5);
-    $("pRP").onclick = () => bumpPendingReps(5);
+    $("pRM5").onclick = () => bumpPendingReps(-5);
+    $("pRM1").onclick = () => bumpPendingReps(-1);
+    $("pRP1").onclick = () => bumpPendingReps(1);
+    $("pRP5").onclick = () => bumpPendingReps(5);
     // oninput must NOT re-render: the caret is inside the field being typed into.
     // onchange (blur / Enter) is where the milestone banner is allowed to reflow.
     $("pReps").oninput = e => setPendingReps(+e.target.value);
