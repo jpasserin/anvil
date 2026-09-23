@@ -1010,7 +1010,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "33";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "34";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2599,6 +2599,24 @@ function badgeState() {
 const EXPORT_NAG_DAYS = 30;
 const EXPORT_MIN_LOGS = 20;
 
+/* What makes a day one you need to recover FROM — which is not the same question
+   as "did you do anything today". A walk with your wife is activity: it belongs in
+   the 150 minutes a week the WHO asks for, and it means you haven't stopped. It is
+   not a training stress, and a rule that calls it one tells you to rest on a day
+   you already did.
+
+   Two ways to be a hard day, because MET measures metabolic cost and not tissue
+   stress — a heavy set reads low on one and high on the other:
+     • anything vigorous, at the standard moderate/vigorous line, or
+     • any resistance work at all, however gentle it looks in kcal.
+   Deliberately NOT used by the day streaks or the badges: those ask "did you show
+   up", a walk is showing up, and a streak you already earned shouldn't evaporate
+   because the definition moved under it. */
+const HARD_MET = 6;
+const HARD_CATS = ["dumbbell", "body", "core"];
+const hardDay = k => logsOn(k).some(l =>
+  metOfLog(l) >= HARD_MET || HARD_CATS.indexOf(l.cat) >= 0);
+
 /* What each exercise actually *does*, keyed on `art` rather than on category.
    Category answers "which drawer does this live in"; this answers "which half of
    the body just did the work", which is the question a lopsided program fails.
@@ -2710,12 +2728,15 @@ function insights(lastExport) {
   for (let i = 1; i <= 10; i++) { if (secsOn(ymd(addDays(today, -i))) > 0) break; restRun++; }
   if (restRun >= 3) add("😴", `${restRun} rest days in a row. A short easy session is usually easier to start than a hard one.`, "warn");
 
-  // 5. no rest at all
+  /* 5. no rest at all. Counted in HARD days, not in days with a log on them:
+     rule 4 above asks "have you stopped", where a walk means no; this one asks
+     "when did you last let anything recover", where a walk means yes. The two
+     questions want different answers and each rule gets the one it needs.
+     Looked at far enough back to report the real number — a streak reported as
+     "14 days" when it is 25 is the one case where a tip undersells itself. */
   let trainRun = 0;
-  // looked at far enough back to report the real number: a streak reported as
-  // "14 days" when it is 25 is the one case where the tip undersells itself
-  for (let i = 0; i < 120; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
-  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built — a day off is training too.`, "warn");
+  for (let i = 0; i < 120; i++) { if (!hardDay(ymd(addDays(today, -i)))) break; trainRun++; }
+  if (trainRun >= 10) add("🛑", `${trainRun} days of hard training in a row. Recovery is when strength is actually built — a walk or a day off counts as training too.`, "warn");
 
   // 6. this week against your own recent norm
   let prior = 0;
