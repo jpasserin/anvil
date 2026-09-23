@@ -526,6 +526,16 @@
   .tip:last-child{border-bottom:none;}
   .tip .ti{flex:0 0 auto;font-size:15px;line-height:1.3;}
   .tip.good{color:var(--good)} .tip.warn{color:var(--warn)} .tip.info{color:var(--txt)}
+  /* a tip you can act on says so with a chevron, not a colour — the colours here
+     already mean "how is this going", and that meaning is worth keeping */
+  .tip.go{cursor:pointer;}
+  .tip.go::after{content:"›";margin-left:auto;padding-left:8px;color:var(--muted);
+    font-size:15px;line-height:1;}
+  .tip.go:active{opacity:.6;}
+  /* says "this one, here" after a scroll that may have moved several things */
+  @keyframes flashme{0%,100%{box-shadow:0 0 0 0 transparent}
+    18%,58%{box-shadow:0 0 0 3px var(--accent)}}
+  .flash{animation:flashme 1.2s ease-in-out 2;}
   .rctl{display:flex;gap:8px;margin-top:10px;}
   /* double height: mid-set you are out of breath and not aiming carefully, so the
      runner's controls are a target you can hit without looking */
@@ -903,7 +913,10 @@
     <div class="card">
       <h2>Data</h2>
       <div class="hint" style="margin-top:0">Everything lives on this device in <code>localStorage</code>.
-        Export regularly until cloud sync lands.</div>
+        Nothing leaves it unless you export or connect a sheet.</div>
+      <!-- what this device can actually claim about its own backup, rather than
+           a standing instruction it has no idea whether you followed -->
+      <div class="hint" id="expState" style="margin-top:6px"></div>
       <div class="btnrow" style="margin-top:12px">
         <button class="btn sec" id="btnExport">Export</button>
         <button class="btn sec" id="btnImport">Import</button>
@@ -997,7 +1010,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "31";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "32";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -1392,6 +1405,13 @@ function save(now) {
   if (now) doIt(); else saveT = setTimeout(doIt, 250);
   if (typeof syncAutoPush === "function") syncAutoPush();
 }
+/* The day THIS device last wrote a backup. Its own key, outside DB, for two
+   reasons: "there is a copy of this somewhere" is a claim only the device that
+   made the copy can make, and anything kept in `settings` would be overwritten
+   the first time a phone that has never exported syncs its settings over. */
+const EXPKEY = LSKEY + ".export";
+const lastExportDay = () => { try { return localStorage.getItem(EXPKEY) || ""; } catch (e) { return ""; } };
+const markExported = () => { try { localStorage.setItem(EXPKEY, todayStr()); } catch (e) {} };
 
 /* ===================== small utils ===================== */
 const $ = id => document.getElementById(id);
@@ -2572,14 +2592,23 @@ function badgeState() {
   });
 }
 
+/* How stale a backup has to be before Today mentions it. A month, because that
+   is roughly how much training I would be unhappy to lose and still short of
+   nagging; and nothing at all until there are enough sessions to be worth
+   keeping. Both are one edit, deliberately, rather than tuned per situation. */
+const EXPORT_NAG_DAYS = 30;
+const EXPORT_MIN_LOGS = 20;
+
 /* =====================================================================
    INSIGHTS — observations drawn from your own log, not generic advice.
    The two guideline anchors are the WHO's public physical-activity
    recommendations (150 min moderate activity + 2 strength days a week).
    ===================================================================== */
-function insights() {
+function insights(lastExport) {
   const out = [];
-  const add = (ic, txt, kind) => out.push({ ic, txt, kind: kind || "info" });
+  // `go` names something on another screen this tip can take you to, for the
+  // tips that ask you to do a thing rather than just telling you one
+  const add = (ic, txt, kind, go) => out.push({ ic, txt, kind: kind || "info", go: go || "" });
   const wk = weekKeyOf(new Date());
   const wkLogs = logsBetween(wk, ymd(addDays(fromYmd(wk), 6)));
   const mins = Math.round(weekSecs(wk) / 60);
@@ -2675,6 +2704,20 @@ function insights() {
   if (top != null && DB.logs.length >= 20) {
     const share = Math.round(hours[top] / DB.logs.length * 100);
     if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
+  }
+
+  /* 12. the backup nobody remembers to make. The one tip that is about the app
+     rather than the training — it earns its place because losing this history
+     is the only failure here that cannot be trained back. It stays quiet below
+     20 sessions (a fresh install has nothing to lose) and while a backup is
+     recent, because a chore that reports success every day stops being read. */
+  if (DB.logs.length >= EXPORT_MIN_LOGS) {
+    const days = lastExport ? Math.round((today - fromYmd(lastExport)) / 86400000) : -1;
+    const since = lastExport ? DB.logs.filter(l => l.date > lastExport).length : DB.logs.length;
+    if (days < 0)
+      add("💾", `${DB.logs.length} sessions on this device and no backup yet. Export writes one file you can keep anywhere.`, "warn", "export");
+    else if (days >= EXPORT_NAG_DAYS)
+      add("💾", `Last backup was ${days} days ago${since ? `, ${since} session${since === 1 ? "" : "s"} back` : ""}. Another export is one tap.`, "warn", "export");
   }
   return out;
 }
@@ -4923,11 +4966,39 @@ function openBadge(x) {
 }
 function renderInsights(elId, limit) {
   const el = $(elId); if (!el) return;
-  const all = insights();
+  // insights() is DOM-free and can't read localStorage, so the one per-device
+  // fact it needs is handed to it
+  const all = insights(lastExportDay());
   const list = limit ? all.slice(0, limit) : all;
   el.innerHTML = list.length
-    ? list.map(i => `<div class="tip ${i.kind}"><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
+    ? list.map(i => `<div class="tip ${i.kind}${i.go ? " go" : ""}"${i.go ? ` data-go="${i.go}"` : ""}><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
     : `<div class="empty">Log a few sessions and suggestions will show up here.</div>`;
+  // "go and do this" is a worse tip than "here, do it" — a nudge you have to go
+  // hunting for is the nudge you ignore a second time
+  el.querySelectorAll(".tip.go").forEach(t => t.onclick = () => goTo(t.dataset.go));
+}
+/* Where a tip can send you. One switch rather than a handler per tip, so the
+   next actionable tip is a string and not a wiring exercise. */
+function goTo(what) {
+  if (what !== "export") return;
+  showTab("settings");
+  const b = $("btnExport");
+  if (!b) return;
+  /* One frame later: showTab ends with scrollTo(0, 0), and a button that was
+     inside a display:none section a moment ago has no position to scroll to yet.
+     Instant rather than smooth — you asked to be here, and the flash is what
+     says which control you came for. */
+  requestAnimationFrame(() => {
+    b.scrollIntoView({ block: "center" });
+    /* Removed, reflowed, re-added: land here twice and the second tap has to
+       animate again, which it won't if the class never left — and reading
+       offsetWidth is what makes the removal land before the add, in this frame
+       rather than the next one. */
+    b.classList.remove("flash");
+    void b.offsetWidth;
+    b.classList.add("flash");
+  });
+  setTimeout(() => b.classList.remove("flash"), 2400);
 }
 
 /* ---------- CALENDAR ---------- */
@@ -6134,8 +6205,21 @@ function syncAutoPush() {
 }
 
 /* ---------- settings ---------- */
+/* The Data card's own line. Separate from renderSettings so the Export click can
+   refresh it without re-rendering a screen full of inputs the user may be in. */
+function paintExportState() {
+  const el = $("expState"); if (!el) return;
+  const day = lastExportDay();
+  if (!day) { el.textContent = `No backup from this device yet — ${DB.logs.length} sessions to lose.`; return; }
+  const days = Math.round((midnight() - fromYmd(day)) / 86400000);
+  const since = DB.logs.filter(l => l.date > day).length;
+  el.textContent = `Last export from this device: ${shortDate(day)}`
+    + (days <= 0 ? " (today)." : ` — ${days} day${days === 1 ? "" : "s"} ago.`)
+    + (since ? ` ${since} session${since === 1 ? "" : "s"} since.` : "");
+}
 function renderSettings() {
   const s = DB.settings, pr = DB.profile;
+  paintExportState();
   $("setBeep").checked = s.beep; $("setVib").checked = s.vib;
   $("setWake").checked = s.wake;
   $("setUnits").value = s.units;
@@ -6292,6 +6376,8 @@ function showTab(t) {
   $("nav").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.tab === t));
   $("hdrSettings").classList.toggle("active", t === "settings");
   $("fab").classList.toggle("show", t === "ex" || t === "goals");
+  // "45 days ago" goes stale on its own, with nothing logged to trigger a render
+  if (t === "settings") paintExportState();
   window.scrollTo(0, 0);
 }
 function boot() {
@@ -6365,6 +6451,11 @@ function boot() {
     a.href = URL.createObjectURL(blob);
     a.download = `anvil-${todayStr()}.json`;
     a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    /* Recorded on click, not on "the file appeared" — the browser never tells us
+       that. Worst case this claims a backup you cancelled at the save dialog,
+       which is the cheaper mistake: the alternative is nagging forever. */
+    markExported();
+    paintExportState();
     toast("Exported");
   };
   $("btnImport").onclick = () => $("fileImport").click();
