@@ -1010,7 +1010,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "32";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "33";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2599,6 +2599,78 @@ function badgeState() {
 const EXPORT_NAG_DAYS = 30;
 const EXPORT_MIN_LOGS = 20;
 
+/* What each exercise actually *does*, keyed on `art` rather than on category.
+   Category answers "which drawer does this live in"; this answers "which half of
+   the body just did the work", which is the question a lopsided program fails.
+   Keying on `art` means an exercise you add later inherits its pattern for free,
+   and an art with no entry here (walking, cycling, shadow boxing) simply votes
+   in none of the balance rules rather than being forced into one. */
+const MOVES = {
+  // pressing: everything that pushes away from you
+  press: "press", sideraise: "press", frontraise: "press", chestpress: "press",
+  tricep: "press", pushup: "press", dip: "press",
+  /* rowing: the scapular pull that balances pressing. Curls are deliberately
+     NOT in here — elbow flexion does nothing for the upper back, and a program
+     built from presses, raises and curls reads as "balanced" only if you let a
+     biceps curl stand in for a row. It can't. */
+  bentrow: "row", pullup: "row", renegade: "row", shrug: "row", rowmachine: "row",
+  curl: "curl", hammer: "curl",
+  // knees and hips
+  squat: "legs", lunge: "legs", goblet: "legs", deadlift: "legs", kb: "legs",
+  wallsit: "legs", bridge: "legs",
+  calf: "calves",
+  // repeated ground contact — what the calves and achilles are actually paying for
+  jumprope: "impact", jack: "impact", knees: "impact", run: "impact",
+  climber: "impact", burpee: "impact",
+  // trunk
+  plank: "core", sideplank: "core", situp: "core", crunch: "core", legraise: "core",
+  twist: "core", bicycle: "core", superman: "core", deadbug: "core",
+  // and the one nobody logs
+  hamstring: "mobility", shoulderstr: "mobility", catcow: "mobility", child: "mobility",
+  downdog: "mobility", hipflex: "mobility", neckroll: "mobility"
+};
+/* Three weeks: long enough that a skipped week isn't a gap and a holiday isn't a
+   finding, short enough to notice a program that has quietly drifted. Every
+   number below is named rather than inlined, because each one is a judgement
+   about what counts as lopsided and all of them are meant to be argued with. */
+const BALANCE_DAYS = 21;
+const BALANCE_MIN_LOGS = 10;   // nothing to say about a program you can't see yet
+const PRESS_PULL_RATIO = 3;    // pressing may outweigh rowing this much before it's a shape
+const PRESS_MIN_MINS = 20;     // ...and only once there is enough pressing to matter
+const LEGS_MIN_MINS = 10;
+const IMPACT_HI_MINS = 45;     // jumping minutes that earn some deliberate calf work
+const REPS_DROP_PCT = 10;      // a smaller drop than this is just a different day
+const REPS_DROP_N = 4;         // and fewer sessions than this is a hint, not a finding
+
+/* Minutes per movement pattern. Rounded once, at the end, so a rule comparing
+   two patterns compares the same numbers the tip will go on to quote. */
+function moveMins(logs) {
+  const m = {};
+  logs.forEach(l => { const k = MOVES[l.art]; if (k) m[k] = (m[k] || 0) + (l.secs || 0) / 60; });
+  Object.keys(m).forEach(k => m[k] = Math.round(m[k]));
+  return m;
+}
+/* An exercise you already own for a pattern you are missing: favourites first,
+   then whatever you last did, then the rest of the library. Naming something you
+   will recognise beats naming the theoretically ideal movement — the tip is
+   suggesting tomorrow's session, not a new training philosophy. */
+const STRENGTH_MOVES = ["press", "row", "curl", "legs", "calves"];
+function pickFor(pattern, rows) {
+  const seen = {};
+  (rows || []).forEach(l => { if ((l.ts || 0) > (seen[l.exId] || 0)) seen[l.exId] = l.ts || 0; });
+  const cands = DB.exercises.filter(e => !e.arch && MOVES[e.art] === pattern);
+  if (!cands.length) return null;
+  /* Cardio machines go last for a strength gap. A rowing machine really is a
+     pull and counts as one above, but suggesting it to fill a missing row
+     assumes a machine the log gives no evidence of — and a gap in strength work
+     is better filled by something you can do where you already train. */
+  const machine = e => (STRENGTH_MOVES.indexOf(pattern) >= 0 && e.cat === "cardio" ? 1 : 0);
+  return cands.slice().sort((a, b) =>
+    (b.fav ? 1 : 0) - (a.fav ? 1 : 0) ||
+    (seen[b.id] || 0) - (seen[a.id] || 0) ||
+    machine(a) - machine(b) || a.ord - b.ord)[0];
+}
+
 /* =====================================================================
    INSIGHTS — observations drawn from your own log, not generic advice.
    The two guideline anchors are the WHO's public physical-activity
@@ -2640,8 +2712,10 @@ function insights(lastExport) {
 
   // 5. no rest at all
   let trainRun = 0;
-  for (let i = 0; i < 14; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
-  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built.`, "warn");
+  // looked at far enough back to report the real number: a streak reported as
+  // "14 days" when it is 25 is the one case where the tip undersells itself
+  for (let i = 0; i < 120; i++) { if (secsOn(ymd(addDays(today, -i))) <= 0) break; trainRun++; }
+  if (trainRun >= 10) add("🛑", `${trainRun} days straight without a rest day. Recovery is when strength is actually built — a day off is training too.`, "warn");
 
   // 6. this week against your own recent norm
   let prior = 0;
@@ -2706,7 +2780,65 @@ function insights(lastExport) {
     if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
   }
 
-  /* 12. the backup nobody remembers to make. The one tip that is about the app
+  /* 12–16. what shape the training is, rather than how much of it there is.
+     Everything above counts minutes; these read *which movements* those minutes
+     were. They only ever name an exercise already in your library, and each one
+     opens it — a suggestion you have to go and find is one you read once. */
+  const balRows = logsBetween(ymd(addDays(today, -BALANCE_DAYS)), ymd(today));
+  const mv = moveMins(balRows), wks = Math.round(BALANCE_DAYS / 7);
+  if (balRows.length >= BALANCE_MIN_LOGS) {
+    // 12. pressing with nothing pulling the other way
+    const press = mv.press || 0, row = mv.row || 0;
+    if (press >= PRESS_MIN_MINS && press >= Math.max(row, 0.5) * PRESS_PULL_RATIO) {
+      const pick = pickFor("row", DB.logs);
+      add("↔️", `${press} min pressing and ${row ? row + " min" : "none"} rowing in ${wks} weeks.`
+        + (pick ? ` ${pick.name} is the other half — shoulders last longer when the upper back does its share.` : ""),
+        "warn", pick ? "ex:" + pick.id : "");
+    }
+    // 13. nothing for the legs
+    const legs = mv.legs || 0;
+    if (legs < LEGS_MIN_MINS) {
+      const pick = pickFor("legs", DB.logs);
+      if (pick) add("🦵", `${legs ? legs + " min" : "Nothing"} for your legs in ${wks} weeks`
+        + (mv.impact ? `, under ${mv.impact} min of jumping and running` : "")
+        + `. ${pick.name} is already in your library.`, "warn", "ex:" + pick.id);
+    }
+    // 14. the calves are quietly paying for the rope
+    if ((mv.impact || 0) >= IMPACT_HI_MINS && !(mv.calves > 0)) {
+      const pick = pickFor("calves", DB.logs);
+      if (pick) add("🦶", `${mv.impact} min of jumping and running in ${wks} weeks and no calf work. `
+        + `${pick.name} is what keeps the achilles ahead of the cardio — tendon adapts slower than fitness does.`,
+        "warn", "ex:" + pick.id);
+    }
+    // 15. the one nobody logs
+    if (!(mv.mobility > 0)) {
+      const pick = pickFor("mobility", DB.logs);
+      if (pick) add("🧘", `No stretching logged in ${wks} weeks. ${pick.name} takes a minute`
+        + (mv.impact ? " and your calves have earned it" : "") + ".", "info", "ex:" + pick.id);
+    }
+    /* 16. the same load getting harder. Only *counted* reps vote: a derived count
+       is the nominal rate played back and is a flat line by construction, so it
+       would report every exercise as perfectly steady forever. Quoted with its
+       sample size, because four sessions is a hint and not a finding. */
+    const real = {};
+    balRows.filter(l => l.reps > 0 && l.secs > 0 && l.load > 0)
+      .forEach(l => (real[l.exId] = real[l.exId] || []).push(l));
+    Object.keys(real).forEach(id => {
+      const rows = real[id].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      // a load change explains a rep change all by itself, so only judge a fixed one
+      if (rows.length < REPS_DROP_N || rows.some(l => l.load !== rows[0].load)) return;
+      const half = Math.floor(rows.length / 2);
+      const rate = ls => ls.reduce((t, l) => t + l.reps / (l.secs / 60), 0) / ls.length;
+      const was = rate(rows.slice(0, half)), now = rate(rows.slice(-half));
+      const drop = Math.round((was - now) / was * 100);
+      if (drop >= REPS_DROP_PCT) add("🔻",
+        `${rows[0].name} is down ${drop}%: ${Math.round(now)}/min from ${Math.round(was)}/min `
+        + `at the same ${fmtW(rows[0].load)}, over ${rows.length} counted sessions. `
+        + `Usually fatigue rather than form.`, "warn", "ex:" + id);
+    });
+  }
+
+  /* 17. the backup nobody remembers to make. The one tip that is about the app
      rather than the training — it earns its place because losing this history
      is the only failure here that cannot be trained back. It stays quiet below
      20 sessions (a fresh install has nothing to lose) and while a backup is
@@ -4980,6 +5112,9 @@ function renderInsights(elId, limit) {
 /* Where a tip can send you. One switch rather than a handler per tip, so the
    next actionable tip is a string and not a wiring exercise. */
 function goTo(what) {
+  /* An exercise tip lands on the exercise's own page, which opens on the dial —
+     so "you haven't trained legs" is one tap from actually training legs. */
+  if (what.slice(0, 3) === "ex:") { if (exById(what.slice(3))) openExercise(what.slice(3)); return; }
   if (what !== "export") return;
   showTab("settings");
   const b = $("btnExport");
@@ -5384,10 +5519,15 @@ function paintExTimer(e) {
     const n = Math.max(1, e.sets || 1), r = Math.max(0, e.setRest == null ? 60 : e.setRest);
     const total = n * evDur + Math.max(0, n - 1) * r;
     const reps = e.rate > 0 && evDur ? Math.round(e.rate * evDur / 60) * n : 0;
-    $("evPlan").textContent = (n > 1
-      ? `${n} sets of ${evDur ? mmss(evDur) : "open"} with ${r}s rest — about ${minsOf(total)} min in all`
-      : leadOf(e) ? `${leadOf(e)}s count-in first` : "")
-      + (reps ? `${n > 1 ? " · " : ""}roughly ${reps} reps at ${e.rate}/min` : "");
+    /* Two independent facts about the next tap — how it is shaped, and what the
+       cadence implies — joined rather than concatenated. The separator belongs to
+       "there is something in front of this", not to "there are sets": tying it to
+       the set count ran a count-in straight into the rep estimate. */
+    const plan = [];
+    if (n > 1) plan.push(`${n} sets of ${evDur ? mmss(evDur) : "open"} with ${r}s rest — about ${minsOf(total)} min in all`);
+    else if (leadOf(e)) plan.push(`${leadOf(e)}s count-in first`);
+    if (reps) plan.push(`roughly ${reps} reps at ${e.rate}/min`);
+    $("evPlan").textContent = plan.join(" · ");
   };
   lab();
   // fixed steps, not adaptive ones: you always know what a tap is worth
