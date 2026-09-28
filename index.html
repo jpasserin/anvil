@@ -1010,7 +1010,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "34";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "35";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -3111,15 +3111,25 @@ function medalUpgrades(before, after) {
    vouch for is the time up to the last heartbeat; everything after it is a
    silence we have to own up to rather than paper over:
 
-     resume   the clock was stopped (paused, armed, resting, counting in) or the
-              silence was short enough to be a hiccup — put the run back and
-              keep counting, dead time included: you were still walking.
-     ask      a running clock and a long silence. The run comes back on the
-              confirm screen holding the time we can prove, with the wall clock
-              offered next to it — accepting is a tap, and neither number is
-              invented.
-     none     nothing worth restoring: no run, a stale one, or a clock with
-              barely anything on it.
+     resume   the clock was stopped (paused, armed, resting, counting in), the
+              silence was short enough to be a hiccup, or the clock is OPEN —
+              put the run back and keep counting, dead time included: you were
+              still walking.
+     ask      a running clock with a *target*, and a long silence. The run comes
+              back on the confirm screen holding the time we can prove, with the
+              wall clock offered next to it — accepting is a tap, and neither
+              number is invented.
+     none     nothing worth restoring: no run, or a stale one.
+
+   An OPEN clock is the case that needs none of this, and the whole apparatus was
+   getting in its way. A counted set has a target, so the silence is a real
+   question: a plank whose page died is not a plank that carried on for three
+   hours, and guessing would log a number nobody measured. An open clock has no
+   target and nothing to reconstruct — you started walking at 07:37 and you are
+   the one who decides when that stops. The start stamp *is* the measurement, so
+   it comes back RUNNING, at wall-clock elapsed, however long the page was away.
+   Stop it or cancel it; you never have to reconcile two numbers to get your walk
+   back.
    ===================================================================== */
 const RUN_GAP_OK = 120;        // seconds of silence still counted as "carried on"
 const RUN_STALE_H = 12;        // after this a snapshot is history, not a run
@@ -3137,6 +3147,11 @@ function runRecovery(s, now) {
   const heard = Math.max(0, (s.savedAt - s.startedAt) / 1000);
   const full = Math.max(0, (now - s.startedAt) / 1000);
   if (stopped) return { mode: "resume", gap, secs: Math.max(0, s.elapsed || 0), km: s.km || 0 };
+  /* No target, so no question to ask: an open clock always comes back running at
+     the wall clock. Note this deliberately ignores both RUN_GAP_OK and
+     RUN_MIN_SECS — a walk whose page was discarded two seconds after it started
+     is still a walk, and the old floor threw it away without saying so. */
+  if (!(s.dur > 0)) return { mode: "resume", gap, secs: full, open: true, km: s.km || 0 };
   if (gap <= RUN_GAP_OK) return { mode: "resume", gap, secs: full, km: s.km || 0 };
   if (heard < RUN_MIN_SECS) return { mode: "none" };
   return { mode: "ask", gap, secs: heard, full, km: s.km || 0 };
@@ -3593,7 +3608,11 @@ function resumeRun() {
   RUN.tick = setInterval(runTick, 200);
   renderRunner();
   saveRun(true);
-  if (rec.mode === "resume") toast(rec.gap > 5 ? "Timer picked back up" : "Timer restored");
+  /* The worry a recovered open clock has to answer is "did I lose my walk", so
+     when the page really was away it says so outright rather than reporting that
+     a timer exists. Under a minute is an ordinary reload and needs no reassuring. */
+  if (rec.mode === "resume") toast(rec.open && rec.gap > 60 ? "Still going — nothing lost"
+                                   : rec.gap > 5 ? "Timer picked back up" : "Timer restored");
 }
 // Hidden is the last moment we are sure to get: on a phone, "hidden" is often
 // the final callback before the page is frozen or discarded outright.
@@ -3700,7 +3719,7 @@ function renderPending() {
         <div class="ss">${p.recovered
           ? `The phone closed Anvil at ${clockTime(p.lastBeat)} with the screen off, and the
              last thing it saved was ${mmss(p.secs)}. You started at ${clockTime(p.beganAt)},
-             ${fmtHM(wall / 60)} ago — if you kept going the whole time, that is the walk.`
+             ${fmtHM(wall / 60)} ago — if you kept going the whole time, that is the session.`
           : `You started at ${clockTime(p.beganAt)}, ${fmtHM(wall / 60)} ago, and the timer
              counted ${mmss(p.secs)}. That happens if the clock was paused, if Done got
              pressed early, or if the phone put the app to sleep while the screen was off.`}</div>
