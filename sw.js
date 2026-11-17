@@ -1,7 +1,7 @@
 // Anvil service worker — network-first for the document, cache-first for the shell.
 // Bump CACHE on every change (keep it equal to APP_VERSION in index.html) so
 // clients pick up the new build on the next reload.
-const CACHE = "anvil-35";
+const CACHE = "anvil-36";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./icon.svg", "./icon-maskable.svg"
@@ -14,7 +14,8 @@ self.addEventListener("install", e => {
 self.addEventListener("activate", e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      /* Only this app's own old caches: the other apps share jpasserin.github.io and its cache storage. */
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k.startsWith('anvil-')).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
