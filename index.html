@@ -1010,7 +1010,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "36";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "37";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -4743,7 +4743,7 @@ function renderBodyCard() {
   const keys = weightKeys();
   if (!kg) {
     $("bodyCard").innerHTML = `<div class="empty" style="padding:12px 6px">No weigh-ins yet.</div>
-      <button class="btn sec" id="bcLog">Log today's weight</button>`;
+      <button class="btn sec" id="bcLog">Log today's weight &amp; waist</button>`;
   } else {
     const t7 = weightTrend(7), t30 = weightTrend(30);
     const delta = t7 - t30;
@@ -4761,7 +4761,8 @@ function renderBodyCard() {
         healthyKgRange(cm) ? ` · healthy range ${fmtW(healthyKgRange(cm)[0])}–${fmtW(healthyKgRange(cm)[1])}` : ""}</div>` : ""}
       ${weightSparkline(90)}
       <button class="btn sec" id="bcLog" style="margin-top:10px">${
-        DB.weights[todayStr()] != null ? "Update today's weight" : "Log today's weight"}</button>`;
+        DB.weights[todayStr()] != null || DB.waists[todayStr()] != null
+          ? "Update today's weight &amp; waist" : "Log today's weight &amp; waist"}</button>`;
   }
   $("bcLog").onclick = () => askWeight(todayStr());
 }
@@ -4782,15 +4783,22 @@ function weightSparkline(days) {
       stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+// one sheet for both body measurements, so the waist lives where the scale does.
+// A blank field means "leave that one alone" — it never deletes anything.
 function askWeight(k) {
-  const cur = DB.weights[k];
+  const cur = DB.weights[k], curW = DB.waists[k];
   const shown = cur != null ? (Math.round(toDisplayW(cur) * 10) / 10) : "";
+  const shownW = curW != null ? (Math.round(toDisplayL(curW) * 10) / 10) : "";
   openSheet(`
-    <h3>Weight</h3>
+    <h3>Weight &amp; waist</h3>
     <div class="hint" style="margin-top:0">${fromYmd(k).toLocaleDateString(undefined,
       { weekday: "long", month: "long", day: "numeric" })}</div>
     <div class="field" style="margin-top:14px"><label for="wwVal">Weight (${wUnit()})</label>
       <input type="number" id="wwVal" step="0.1" min="0" inputmode="decimal" value="${shown}"></div>
+    <div class="field"><label for="wwWaist">Waist (${lUnit()}) <span style="font-weight:400;color:var(--muted)">· optional</span></label>
+      <input type="number" id="wwWaist" step="0.1" min="0" inputmode="decimal" value="${shownW}"></div>
+    <div class="hint" style="margin-top:-8px">Tape level with your navel, snug, at the end of a normal
+      breath out. First thing in the morning is the most repeatable.</div>
     <div class="field"><label for="wwDate">Date</label>
       <input type="date" id="wwDate" value="${k}" max="${todayStr()}"></div>
     <div class="btnrow">
@@ -4801,11 +4809,17 @@ function askWeight(k) {
     $("wwVal").focus();
     $("wwCancel").onclick = closeSheet;
     $("wwOk").onclick = () => {
-      const v = +$("wwVal").value;
-      if (!(v > 0)) { toast("Enter a weight", "err"); return; }
+      const v = +$("wwVal").value, w = +$("wwWaist").value;
+      if (!(v > 0) && !(w > 0)) { toast("Enter a weight or a waist", "err"); return; }
       const d = $("wwDate").value || k;
-      if (d !== k) delete DB.weights[k];
-      DB.weights[d] = Math.round(fromDisplayW(v) * 100) / 100;
+      if (v > 0) {
+        if (d !== k) delete DB.weights[k];
+        DB.weights[d] = Math.round(fromDisplayW(v) * 100) / 100;
+      }
+      if (w > 0) {
+        if (d !== k) delete DB.waists[k];
+        DB.waists[d] = Math.round(fromDisplayL(w) * 10) / 10;
+      }
       save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); toast("Saved");
     };
     if (cur != null) $("wwDel").onclick = () => {
