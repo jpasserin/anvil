@@ -106,6 +106,9 @@
   .ghead .gi{flex:0 0 auto;font-size:20px;line-height:1;}
   .ghead .gn{flex:1;min-width:0;font-size:14.5px;font-weight:700;overflow:hidden;
     text-overflow:ellipsis;white-space:nowrap;}
+  .gbonus{display:inline-block;vertical-align:1px;margin-left:4px;padding:1px 6px;border-radius:8px;
+    font-size:9.5px;font-weight:700;letter-spacing:.3px;text-transform:uppercase;
+    color:var(--accent2);border:1px solid var(--accent2);opacity:.85;}
   .ghead .gv{flex:0 0 auto;font-size:13px;font-variant-numeric:tabular-nums;color:var(--muted);}
   .ghead .gv b{color:var(--txt);font-size:14.5px;}
   .ghead .gm{flex:0 0 auto;font-size:17px;line-height:1;}
@@ -201,6 +204,7 @@
   /* an icon above the number, not beside it: three stats share a phone row and
      the number must stay on one line whatever the emoji is worth */
   .stat .sic{font-size:16px;line-height:1;margin-bottom:3px;}
+  .stat .rg{font-size:9.5px;color:var(--muted);margin-top:3px;white-space:nowrap;}
   .stat .n small{font-size:.5em;color:var(--muted);font-weight:600;}
   .stat .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-top:5px;line-height:1.2;}
 
@@ -265,6 +269,10 @@
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:28px;}
   .extile .d{font-size:9.5px;color:var(--txt);opacity:.85;}
   .extile .w{font-size:9px;color:var(--muted);margin-top:1px;}
+  /* Today's grid drops the duration and lets a one-line name sit tight on the
+     "last done" line, so twelve tiles take noticeably less of the screen */
+  #routineGrid .extile{padding:6px 5px 5px;}
+  #routineGrid .extile .n{min-height:0;}
 
   /* ---- today's logged sessions, one full-width row each ----
      a list, not a grid: today's sessions are a few rows you read top to bottom,
@@ -676,13 +684,8 @@
     </div>
 
     <div class="card">
-      <h2>Body <span class="act" id="goBody">weight &amp; BMI ›</span></h2>
+      <h2>Body <span class="act" id="goBody">details ›</span></h2>
       <div id="bodyCard"></div>
-    </div>
-
-    <div class="card" id="chainCard">
-      <h2>Circuits <span class="act" id="newChain">+ new</span></h2>
-      <div id="chainList"></div>
     </div>
 
     <!-- last card on the page: read it once the day is done, not before -->
@@ -769,6 +772,16 @@
       <h2>Last 90 days</h2>
       <div id="chart90"></div>
       <div class="hint" id="note90"></div>
+    </div>
+
+    <div class="card">
+      <h2>Weight <span class="act" style="color:var(--muted);cursor:default" id="histWLab"></span></h2>
+      <div id="histWeight"></div>
+    </div>
+
+    <div class="card">
+      <h2>Waist <span class="act" style="color:var(--muted);cursor:default" id="histWsLab"></span></h2>
+      <div id="histWaist"></div>
     </div>
 
     <div class="card">
@@ -1010,7 +1023,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "37";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "38";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -1846,11 +1859,15 @@ const weekKeyOf = d => ymd(weekStart(d));
 const liveGoals = () => (DB.goals || []).filter(g => !g.arch).sort((a, b) => a.ord - b.ord);
 // goals that had a target in force that week, which is the set that week is judged on
 const goalsInWeek = wk => liveGoals().filter(g => goalTiers(goalRev(g, wk)));
+// of those, the ones the week's medal actually depends on
+const requiredGoalsInWeek = wk => goalsInWeek(wk).filter(g => !goalIsBonus(g, wk));
 /* The week's minutes target is what its goals add up to, distance converted at
    the pace of the exercises it covers. Two goals over the same exercise do
-   count twice — that is the user asking for both, not a bug to paper over. */
+   count twice — that is the user asking for both, not a bug to paper over.
+   Bonus goals are extra credit, so they don't make the month or year harder. */
 function weekGoalMin(mondayKey) {
-  return liveGoals().reduce((t, g) => t + goalWeekMin(g, DB.exercises, mondayKey), 0);
+  return liveGoals().filter(g => !goalIsBonus(g, mondayKey))
+    .reduce((t, g) => t + goalWeekMin(g, DB.exercises, mondayKey), 0);
 }
 function weekSecs(mondayKey) {
   const d = fromYmd(mondayKey);
@@ -2007,7 +2024,7 @@ function streakNeed(kind) {
       : { ok: false, txt: "train today", risk: true };
   }
   const wk = weekKeyOf(new Date());
-  const sts = goalsInWeek(wk).map(g => goalState(g, wk));
+  const sts = requiredGoalsInWeek(wk).map(g => goalState(g, wk));
   if (!sts.length) return { ok: false, txt: "set a goal", risk: false };
   // goals still short of a given tier, and how much the nearest one needs
   const short = r => sts.filter(s => medalRank(s.medal) < r);
@@ -2439,6 +2456,8 @@ function exDaily(ex, rows, days) {
 function waistKeys() { return Object.keys(DB.waists || {}).sort(); }
 const latestWaistCm = () => { const k = waistKeys(); return k.length ? DB.waists[k[k.length - 1]] : 0; };
 const whtr = (waistCm, heightCm) => (waistCm > 0 && heightCm > 0) ? waistCm / heightCm : 0;
+// the waist that keeps waist-to-height healthy: 0.4 up to, not including, 0.5
+const healthyWaistRange = cm => cm > 0 ? [0.4 * cm, 0.5 * cm] : null;
 function whtrBand(v) {
   if (!v) return { label: "—", color: "var(--muted)" };
   if (v < 0.4)  return { label: "low", color: "var(--warn)" };
@@ -2748,17 +2767,13 @@ function insights(lastExport) {
     else if (diff >= 30) add("📈", `${mins} min this week vs a ${avg} min average — up ${diff}%.`, "good");
   }
 
-  // 7. weight trend and its rate
+  // 7. weight moving too fast — the only weight trend worth a tip; a normal
+  //    trend is just a number, and the Body page already shows it
   const kg = latestWeightKg();
   if (kg > 0) {
-    const t7 = weightTrend(7), t30 = weightTrend(30);
-    const d = t7 - t30;
-    if (Math.abs(d) >= 0.3) {
-      const pctPerWeek = Math.abs(d) / kg * 100 / 3;      // ~3 weeks between the window centres
-      const dir = d < 0 ? "down" : "up";
-      if (pctPerWeek > 1) add("⚠️", `Weight is ${dir} ${fmtW(Math.abs(d))} on the trend — that is a fast rate. Around 0.5–1% of bodyweight a week is the usual sustainable range.`, "warn");
-      else add(d < 0 ? "📉" : "📈", `Weight trend is ${dir} ${fmtW(Math.abs(d))} comparing the last week to the last month.`, "info");
-    }
+    const d = weightTrend(7) - weightTrend(30);
+    const pctPerWeek = Math.abs(d) / kg * 100 / 3;        // ~3 weeks between the window centres
+    if (Math.abs(d) >= 0.3 && pctPerWeek > 1) add("⚠️", `Weight is ${d < 0 ? "down" : "up"} ${fmtW(Math.abs(d))} on the trend — that is a fast rate. Around 0.5–1% of bodyweight a week is the usual sustainable range.`, "warn");
   }
   // 8. stale weigh-in
   const wKeys = weightKeys();
@@ -2767,13 +2782,10 @@ function insights(lastExport) {
     if (gap >= 10) add("⚖️", `Last weigh-in was ${gap} days ago. Weekly is enough — daily is noise.`, "info");
   } else add("⚖️", "No weigh-ins yet. Without one, calories can't be estimated at all.", "info");
 
-  // 9. waist-to-height
+  // 9. waist — the Body card already colours it against its healthy range, so
+  //    the only tip left is the nudge to measure it at all
   const waist = latestWaistCm(), h = DB.profile.heightCm;
-  if (waist > 0 && h > 0) {
-    const r = whtr(waist, h), band = whtrBand(r);
-    if (r >= 0.5) add("📏", `Waist-to-height is ${r.toFixed(2)} (${band.label}). Under 0.5 — waist less than half your height — is the usual target.`, "warn");
-    else add("📏", `Waist-to-height is ${r.toFixed(2)} — ${band.label}.`, "good");
-  } else if (h > 0 && !waist) {
+  if (h > 0 && !waist) {
     add("📏", "Try a waist measurement — it reads body-fat risk better than BMI, which can't tell muscle from fat.", "info");
   }
 
@@ -2791,15 +2803,6 @@ function insights(lastExport) {
       add("🏋️", `${last.name} has been at ${fmtW(last.load)} for ${Math.round(weeks)} weeks. Adding a little load or a set is how it keeps working.`, "info");
     }
   });
-
-  // 11. when you actually train
-  const hours = {};
-  DB.logs.forEach(l => { const h2 = new Date(l.ts).getHours(); hours[h2] = (hours[h2] || 0) + 1; });
-  const top = Object.keys(hours).sort((a, b) => hours[b] - hours[a])[0];
-  if (top != null && DB.logs.length >= 20) {
-    const share = Math.round(hours[top] / DB.logs.length * 100);
-    if (share >= 40) add("🕘", `${share}% of your sessions start around ${top}:00 — that slot is clearly your habit. Protect it.`, "info");
-  }
 
   /* 12–16. what shape the training is, rather than how much of it there is.
      Everything above counts minutes; these read *which movements* those minutes
@@ -2874,6 +2877,26 @@ function insights(lastExport) {
   }
   return out;
 }
+/* Today shows a handful, not the lot. Warnings outrank observations, which
+   outrank pats on the back; within each group the list turns over by one a day,
+   so a tip that can't fit today gets its turn tomorrow instead of never. The
+   order inside a group is kept, so the export tip still trails the training. */
+const TIPS_SHOWN = 5;
+const TIP_RANK = { warn: 0, info: 1, good: 2 };
+function pickTips(all, n, day) {
+  const groups = [[], [], []];
+  all.forEach(t => groups[TIP_RANK[t.kind] != null ? TIP_RANK[t.kind] : 1].push(t));
+  const out = [];
+  for (const g of groups) {
+    const room = n - out.length;
+    if (room <= 0) break;
+    if (g.length <= room) { out.push(...g); continue; }
+    const off = ((day % g.length) + g.length) % g.length;
+    const rot = g.slice(off).concat(g.slice(0, off)).slice(0, room);
+    out.push(...g.filter(t => rot.includes(t)));       // rotated in, original order kept
+  }
+  return out;
+}
 
 function niceMax(v) {
   if (v <= 0) return 10;
@@ -2941,6 +2964,11 @@ const goalMedalOf = (val, t) => !t ? null
 // the tiers this goal can actually award, so the UI can grey out the rest
 const goalHasTier = (t, k) => !t ? false
   : k === "bronze" ? t.bronze > 0 : k === "silver" ? t.silver > t.bronze : t.gold > t.silver;
+/* A bonus goal still wins its own medals, but the week's medal ignores it — it's
+   extra credit, so missing it never costs the week. Kept on the revision like the
+   targets, so flipping it applies from this week on and earlier weeks keep the
+   verdict they were given. */
+const goalIsBonus = (g, wk) => !!(goalRev(g, wk) || {}).bonus;
 
 /* Which exercises count. `all` tracks the whole library, a category tracks
    itself as it grows, and exIds pin individual ones — the union of the three,
@@ -3050,7 +3078,7 @@ function exGoalMedal(e) {
    goal missed outright and the week has no medal at all — which is the same test
    the old weekly-goal streak used, so `goalsWeekMet` is now just "any medal". */
 function goalsWeekMedal(goals, exercises, rows, wk) {
-  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
+  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)) && !goalIsBonus(g, wk));
   if (!live.length) return null;
   let worst = 3;
   for (const g of live) {
@@ -3068,7 +3096,7 @@ const goalsWeekMet = (goals, exercises, rows, wk) =>
    set can't go gold, and the tile says so rather than showing a zero that looks
    like a failure. */
 function goalsWeekCanTier(goals, exercises, wk, k) {
-  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)));
+  const live = goals.filter(g => !g.arch && goalTiers(goalRev(g, wk)) && !goalIsBonus(g, wk));
   return live.length > 0 && live.every(g => goalHasTier(goalTiers(goalRev(g, wk)), k));
 }
 /* What each goal is holding this week, as a rank per goal id. Taken before a
@@ -3184,11 +3212,6 @@ function startExercise(exId, durOverride, setsOverride) {
   const n = Math.max(1, setsOverride != null ? setsOverride : (ex.sets || 1));
   const ids = []; for (let i = 0; i < n; i++) ids.push(exId);
   startQueue(ids, n > 1 ? (ex.setRest || 0) : 0, n > 1 ? `${n} sets` : "", durOverride);
-}
-function startRoutine(rt) {
-  const items = rt.items.filter(exById);
-  if (!items.length) { toast("That circuit is empty", "err"); return; }
-  startQueue(items, rt.rest == null ? DB.settings.rest : rt.rest, rt.name);
 }
 function startQueue(ids, rest, name, durOverride) {
   // a mixed queue keeps each exercise's own duration; only a single-exercise
@@ -4004,10 +4027,9 @@ function renderToday() {
 
   renderStreaks();
   renderWeekGoal();
-  renderInsights("tipsToday", 0);
+  renderInsights("tipsToday", TIPS_SHOWN);
   renderBodyCard();
   renderRoutineList();
-  renderChainList();
 }
 const calYNow = () => new Date().getFullYear();
 const calMNow = () => new Date().getMonth();
@@ -4317,7 +4339,7 @@ function goalCard(st, compact) {
   return `<div class="gcard ${compact ? "mini" : ""} ${medal ? "done" : ""}" data-goal="${g.id}" style="--tint:${tint}">
     <div class="ghead">
       <span class="gi">${g.ic || "🎯"}</span>
-      <span class="gn">${esc(g.name)}</span>
+      <span class="gn">${esc(g.name)}${st.rev && st.rev.bonus ? ` <span class="gbonus">bonus</span>` : ""}</span>
       ${/* one unit for the pair, so a 55-minute week against a 60-minute tier
              doesn't read as "55 min / 1h" and make you do the conversion */""}
       <span class="gv"><b>${goalNow(g, val)}</b> / ${goalToInput(g, next)} ${esc(goalUnit(g))}</span>
@@ -4461,8 +4483,10 @@ function openCheer(won) {
      every live goal is in this batch both sides of that minimum are known
      exactly, which is the only case where the claim can be made honestly. */
   const weekM = goalsWeekMedal(DB.goals, DB.exercises, DB.logs, wk);
-  const allIn = won.length === liveGoals().length;
-  const weekLine = allIn && weekM && MEDAL_RANK[weekM] > Math.min(...won.map(u => u.from))
+  const req = requiredGoalsInWeek(wk);
+  const reqWon = won.filter(u => req.some(g => g.id === u.id));
+  const allIn = req.length > 0 && reqWon.length === req.length;
+  const weekLine = allIn && weekM && MEDAL_RANK[weekM] > Math.min(...reqWon.map(u => u.from))
     ? `<div class="hint" style="margin-top:12px">Every goal is met — the whole week is
        ${MEDAL[weekM].ic} ${MEDAL[weekM].lbl.toLowerCase()} as it stands.</div>` : "";
   openSheet(`<div class="cheer">
@@ -4497,11 +4521,14 @@ function renderWeekGoal() {
     $("wkEmpty").onclick = () => showTab("goals");
     return;
   }
-  const sts = gs.map(g => goalState(g, wk));
-  const done = sts.filter(s => s.medal).length;
+  // required goals first, bonus ones after: only the first group decides the week
+  const sts = gs.map(g => goalState(g, wk))
+    .sort((a, b) => (a.rev && a.rev.bonus ? 1 : 0) - (b.rev && b.rev.bonus ? 1 : 0));
+  const req = sts.filter(s => !(s.rev && s.rev.bonus));
+  const done = req.filter(s => s.medal).length;
   box.innerHTML = `<div class="goalhead">
       <span class="lab">Weekly goals</span>
-      <span class="val edit" id="wkVal">${done}/${sts.length} met ›</span></div>
+      <span class="val edit" id="wkVal">${req.length ? `${done}/${req.length} met` : "bonus only"} ›</span></div>
     ${sts.map(s => goalCard(s, true)).join("")}`;
   $("wkVal").onclick = () => showTab("goals");
   // Today summarises; the Goals tab edits. See openGoalBreak.
@@ -4597,6 +4624,9 @@ function editGoal(g) {
         <div class="field"><label for="glG" style="font-size:11px">🥇 gold +</label>
           <input type="number" id="glG" min="0" step="1" value="${cur.gold}"></div>
       </div></div>
+    <div class="field toggle"><span>Bonus goal<br><small class="muted">Earns its own medals, but missing it
+        never costs the week its medal</small></span>
+      <label class="switch"><input type="checkbox" id="glBonus" ${rev && rev.bonus ? "checked" : ""}><span class="sl"></span></label></div>
     <div class="field"><label>Exercises <span id="glCount" class="muted"></span></label>
       <div class="gpick" id="glCats"></div>
       <div class="gpick" id="glEx" style="margin-top:8px"></div></div>
@@ -4660,6 +4690,7 @@ function editGoal(g) {
       const nr = { from: wk, target: goalFromInput(patch, t),
                    silver: goalFromInput(patch, +$("glS").value || 0),
                    gold: goalFromInput(patch, +$("glG").value || 0) };
+      if ($("glBonus").checked) nr.bonus = true;
       if (isNew) {
         DB.goals.push(Object.assign({ id: uid("gl"), ord: DB.goals.length, arch: false, revs: [nr] }, patch));
       } else {
@@ -4700,7 +4731,6 @@ function renderRoutineList() {
     return `<div class="extile" data-openex="${e.id}" style="--catc:${catColor(e.cat)}">
       <div class="a">${art(e.art)}</div>
       <div class="n">${esc(e.name)}</div>
-      <div class="d">${durLabel(e.dur)}</div>
       <div class="w">${ts ? relDay(ts) : "never"}</div>
     </div>`;
   }).join("") : `<div class="empty" style="grid-column:1/-1">Add an exercise to get started.</div>`;
@@ -4715,90 +4745,49 @@ function relDay(ts) {
   if (n < 60) return Math.round(n / 7) + "w ago";
   return fromYmd(ymd(d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
-function renderChainList() {
-  $("chainList").innerHTML = DB.routines.length ? DB.routines.map(rt => {
-    const items = rt.items.map(exById).filter(Boolean);
-    const total = items.reduce((s, e) => s + (e.dur || 0), 0)
-      + Math.max(0, items.length - 1) * (rt.rest == null ? DB.settings.rest : rt.rest);
-    return `<div class="exrow">
-      <div style="flex:1;min-width:0">
-        <div class="t">${esc(rt.name)}</div>
-        <div class="s">${items.length} exercise${items.length === 1 ? "" : "s"} · ~${minsOf(total)} min</div>
-      </div>
-      <button class="chip" data-edrt="${rt.id}">Edit</button>
-      <button class="chip on" data-runrt="${rt.id}">Start</button>
-    </div>`;
-  }).join("") : `<div class="empty">A circuit chains exercises back to back with rests.</div>`;
-  $("chainList").querySelectorAll("[data-runrt]").forEach(b =>
-    b.onclick = () => { const r = DB.routines.find(x => x.id === b.dataset.runrt); r && startRoutine(r); });
-  $("chainList").querySelectorAll("[data-edrt]").forEach(b =>
-    b.onclick = () => editRoutine(DB.routines.find(x => x.id === b.dataset.edrt)));
-}
 
 /* ---------- BODY: card, page, weight chart ---------- */
 function renderBodyCard() {
   const kg = latestWeightKg();
-  const cm = DB.profile.heightCm;
-  const v = bmi(kg, cm), band = bmiBand(v);
-  const keys = weightKeys();
-  if (!kg) {
-    $("bodyCard").innerHTML = `<div class="empty" style="padding:12px 6px">No weigh-ins yet.</div>
-      <button class="btn sec" id="bcLog">Log today's weight &amp; waist</button>`;
-  } else {
-    const t7 = weightTrend(7), t30 = weightTrend(30);
-    const delta = t7 - t30;
-    const last = keys[keys.length - 1];
-    $("bodyCard").innerHTML = `
-      <div class="streakrow">
-        <div class="stat"><div class="n">${(Math.round(toDisplayW(kg) * 10) / 10).toFixed(1)}<small>${wUnit()}</small></div>
-          <div class="l">${last === todayStr() ? "Today" : relDay(fromYmd(last).getTime())}</div></div>
-        <div class="stat"><div class="n">${v ? v.toFixed(1) : "—"}</div><div class="l">BMI</div></div>
-        <div class="stat"><div class="n" style="color:${Math.abs(delta) < 0.05 ? "var(--txt)" : (delta < 0 ? "var(--good)" : "var(--warn)")}">${
-          delta > 0 ? "+" : ""}${(Math.round(toDisplayW(delta) * 10) / 10).toFixed(1)}</div>
-          <div class="l">7d vs 30d</div></div>
-      </div>
-      ${v ? `<div class="hint" style="margin-bottom:0">BMI <b style="color:${band.color}">${band.label}</b>${
-        healthyKgRange(cm) ? ` · healthy range ${fmtW(healthyKgRange(cm)[0])}–${fmtW(healthyKgRange(cm)[1])}` : ""}</div>` : ""}
-      ${weightSparkline(90)}
-      <button class="btn sec" id="bcLog" style="margin-top:10px">${
-        DB.weights[todayStr()] != null || DB.waists[todayStr()] != null
-          ? "Update today's weight &amp; waist" : "Log today's weight &amp; waist"}</button>`;
-  }
-  $("bcLog").onclick = () => askWeight(todayStr());
-}
-// tiny inline trend line for the Today card — no axes, it's a glance not a chart
-function weightSparkline(days) {
-  const keys = weightKeys();
-  if (keys.length < 2) return "";
-  const cut = ymd(addDays(midnight(), -(days - 1)));
-  const pts = keys.filter(k => k >= cut).map(k => [fromYmd(k).getTime(), DB.weights[k]]);
-  if (pts.length < 2) return "";
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const y0 = Math.min(...ys), y1 = Math.max(...ys);
-  const W = 300, H = 42, sx = x1 > x0 ? W / (x1 - x0) : 0, sy = y1 > y0 ? H / (y1 - y0) : 0;
-  const line = pts.map(p => `${((p[0] - x0) * sx).toFixed(1)},${(H - (p[1] - y0) * sy).toFixed(1)}`).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:42px;display:block;margin-top:10px" aria-hidden="true">
-    <polyline points="${line}" fill="none" stroke="var(--accent2)" stroke-width="2"
-      stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/></svg>`;
+  const waist = latestWaistCm(), cm = DB.profile.heightCm;
+  const v = bmi(kg, cm);
+  const kgR = healthyKgRange(cm), wR = healthyWaistRange(cm);
+  const tk = todayStr();
+  /* Three boxes, one per number, each carrying its own healthy range so the
+     answer to "is that good?" sits under the number. Green means in range;
+     anything else stays plain, since the Body page has the detail. */
+  const ok = (x, r) => x > 0 && !!r && x >= r[0] && x < r[1];
+  const r0 = x => Math.round(x);
+  const box = (n, unit, lab, range, good) => `<div class="stat">
+      <div class="n"${good ? ` style="color:var(--good)"` : ""}>${n}${n !== "—" && unit ? `<small>${unit}</small>` : ""}</div>
+      <div class="l">${lab}</div>
+      <div class="rg">${range ? "healthy " + range : "&nbsp;"}</div></div>`;
+  $("bodyCard").innerHTML = `
+    <div class="streakrow">
+      ${box(kg ? (Math.round(toDisplayW(kg) * 10) / 10).toFixed(1) : "—", wUnit(), "Weight",
+        kgR ? `${r0(toDisplayW(kgR[0]))}–${r0(toDisplayW(kgR[1]))}` : "", ok(kg, kgR))}
+      ${box(v ? v.toFixed(1) : "—", "", "BMI", cm ? "18.5–24.9" : "", ok(v, [18.5, 25]))}
+      ${box(waist ? (Math.round(toDisplayL(waist) * 10) / 10).toFixed(1) : "—", lUnit(), "Waist",
+        wR ? `${r0(toDisplayL(wR[0]))}–${r0(toDisplayL(wR[1]))}` : "", ok(waist, wR))}
+    </div>
+    ${cm ? "" : `<div class="hint" style="margin-bottom:0">Add your height in Settings to see BMI and the healthy ranges.</div>`}
+    <div class="btnrow" style="margin-top:10px">
+      <button class="btn sec" id="bcLog">${DB.weights[tk] != null ? "Update" : "Log"} weight</button>
+      <button class="btn sec" id="bcWaist">${DB.waists[tk] != null ? "Update" : "Log"} waist</button>
+    </div>`;
+  $("bcLog").onclick = () => askWeight(tk);
+  $("bcWaist").onclick = () => askWaist(tk);
 }
 
-// one sheet for both body measurements, so the waist lives where the scale does.
-// A blank field means "leave that one alone" — it never deletes anything.
 function askWeight(k) {
-  const cur = DB.weights[k], curW = DB.waists[k];
+  const cur = DB.weights[k];
   const shown = cur != null ? (Math.round(toDisplayW(cur) * 10) / 10) : "";
-  const shownW = curW != null ? (Math.round(toDisplayL(curW) * 10) / 10) : "";
   openSheet(`
-    <h3>Weight &amp; waist</h3>
+    <h3>Weight</h3>
     <div class="hint" style="margin-top:0">${fromYmd(k).toLocaleDateString(undefined,
       { weekday: "long", month: "long", day: "numeric" })}</div>
     <div class="field" style="margin-top:14px"><label for="wwVal">Weight (${wUnit()})</label>
       <input type="number" id="wwVal" step="0.1" min="0" inputmode="decimal" value="${shown}"></div>
-    <div class="field"><label for="wwWaist">Waist (${lUnit()}) <span style="font-weight:400;color:var(--muted)">· optional</span></label>
-      <input type="number" id="wwWaist" step="0.1" min="0" inputmode="decimal" value="${shownW}"></div>
-    <div class="hint" style="margin-top:-8px">Tape level with your navel, snug, at the end of a normal
-      breath out. First thing in the morning is the most repeatable.</div>
     <div class="field"><label for="wwDate">Date</label>
       <input type="date" id="wwDate" value="${k}" max="${todayStr()}"></div>
     <div class="btnrow">
@@ -4809,17 +4798,11 @@ function askWeight(k) {
     $("wwVal").focus();
     $("wwCancel").onclick = closeSheet;
     $("wwOk").onclick = () => {
-      const v = +$("wwVal").value, w = +$("wwWaist").value;
-      if (!(v > 0) && !(w > 0)) { toast("Enter a weight or a waist", "err"); return; }
+      const v = +$("wwVal").value;
+      if (!(v > 0)) { toast("Enter a weight", "err"); return; }
       const d = $("wwDate").value || k;
-      if (v > 0) {
-        if (d !== k) delete DB.weights[k];
-        DB.weights[d] = Math.round(fromDisplayW(v) * 100) / 100;
-      }
-      if (w > 0) {
-        if (d !== k) delete DB.waists[k];
-        DB.waists[d] = Math.round(fromDisplayL(w) * 10) / 10;
-      }
+      if (d !== k) delete DB.weights[k];
+      DB.weights[d] = Math.round(fromDisplayW(v) * 100) / 100;
       save(true); closeSheet(); renderAll(); if (bodyOpen) paintBody(); toast("Saved");
     };
     if (cur != null) $("wwDel").onclick = () => {
@@ -5038,14 +5021,20 @@ function progressCard(ex, rows) {
       read as progress. The pale bar is the week you're in — it isn't finished yet.</div>`;
 }
 function weightChart(days) {
-  const keys = weightKeys();
   const cut = days ? ymd(addDays(midnight(), -(days - 1))) : "";
-  const pts = keys.filter(k => !cut || k >= cut).map(k => [fromYmd(k).getTime(), DB.weights[k]]);
-  if (pts.length < 2) return `<div class="empty">Two weigh-ins in this range and the chart appears.</div>`;
+  return measureChart(DB.weights, cut, "", { band: healthyKgRange(DB.profile.heightCm),
+    disp: toDisplayW, unit: wUnit(), bandLab: "healthy BMI", what: "weigh-ins", label: "Weight over time" });
+}
+/* One line over time for a {date: value} map — weight or waist — between two
+   day keys (either may be ""), with the healthy band shaded behind it. */
+function measureChart(map, from, to, o) {
+  const keys = Object.keys(map || {}).sort();
+  const pts = keys.filter(k => (!from || k >= from) && (!to || k <= to)).map(k => [fromYmd(k).getTime(), map[k]]);
+  if (pts.length < 2) return `<div class="empty">Two ${o.what} in this range and the chart appears.</div>`;
   const W = 300, H = 120;
   const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
   const x0 = Math.min(...xs), x1 = Math.max(...xs);
-  const range = healthyKgRange(DB.profile.heightCm);
+  const range = o.band;
   let lo = Math.min(...ys), hi = Math.max(...ys);
   const pad = Math.max(0.5, (hi - lo) * 0.18);
   lo -= pad; hi += pad;
@@ -5059,14 +5048,14 @@ function weightChart(days) {
       fill="var(--good)" opacity=".10"/>`;
   }
   return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:150px;display:block"
-      role="img" aria-label="Weight over time">
+      role="img" aria-label="${esc(o.label)}">
       ${bandRect}
       <polyline points="${line}" fill="none" stroke="var(--accent)" stroke-width="2"
         stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
     </svg>
     <div class="bandlab" style="margin-top:4px">
       <span>${fromYmd(ymd(new Date(x0))).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
-      <span>${(Math.round(toDisplayW(lo) * 10) / 10).toFixed(1)}–${(Math.round(toDisplayW(hi) * 10) / 10).toFixed(1)} ${wUnit()}${range ? " · shaded = healthy BMI" : ""}</span>
+      <span>${(Math.round(o.disp(lo) * 10) / 10).toFixed(1)}–${(Math.round(o.disp(hi) * 10) / 10).toFixed(1)} ${o.unit}${range ? " · shaded = " + o.bandLab : ""}</span>
       <span>${fromYmd(ymd(new Date(x1))).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
     </div>`;
 }
@@ -5155,7 +5144,7 @@ function renderInsights(elId, limit) {
   // insights() is DOM-free and can't read localStorage, so the one per-device
   // fact it needs is handed to it
   const all = insights(lastExportDay());
-  const list = limit ? all.slice(0, limit) : all;
+  const list = limit ? pickTips(all, limit, Math.floor(midnight().getTime() / 86400000)) : all;
   el.innerHTML = list.length
     ? list.map(i => `<div class="tip ${i.kind}${i.go ? " go" : ""}"${i.go ? ` data-go="${i.go}"` : ""}><span class="ti">${i.ic}</span><span>${i.txt}</span></div>`).join("")
     : `<div class="empty">Log a few sessions and suggestions will show up here.</div>`;
@@ -5348,6 +5337,13 @@ function renderHistory() {
     gl.innerHTML = `<span>goal ${Math.round(mGoalSecs / 360) / 10}h</span>`;
     mc.appendChild(gl);
   }
+
+  // body measurements across the year on show, healthy band shaded behind
+  $("histWLab").textContent = $("histWsLab").textContent = histYear;
+  $("histWeight").innerHTML = measureChart(DB.weights, from, to, { band: healthyKgRange(DB.profile.heightCm),
+    disp: toDisplayW, unit: wUnit(), bandLab: "healthy BMI", what: `weigh-ins in ${histYear}`, label: "Weight over the year" });
+  $("histWaist").innerHTML = measureChart(DB.waists, from, to, { band: healthyWaistRange(DB.profile.heightCm),
+    disp: toDisplayL, unit: lUnit(), bandLab: "healthy waist", what: `waist measurements in ${histYear}`, label: "Waist over the year" });
 
   // last 90 days
   const vals = [];
@@ -6137,67 +6133,6 @@ function newExercise(draft) {
   });
 }
 
-function editRoutine(rt) {
-  const isNew = !rt;
-  const r = rt || { id: null, name: "", rest: DB.settings.rest, items: [] };
-  let items = r.items.slice();
-  openSheet(`
-    <h3>${isNew ? "New circuit" : "Edit circuit"}</h3>
-    <div class="field"><label for="rtName">Name</label><input id="rtName" value="${esc(r.name)}" autocomplete="off"></div>
-    <div class="field"><label for="rtRest">Rest between exercises (seconds)</label>
-      <input type="number" id="rtRest" min="0" max="600" step="5" value="${r.rest}"></div>
-    <div class="field"><label>Exercises <span id="rtCount" class="muted"></span></label><div id="rtItems"></div></div>
-    <div class="field"><label for="rtAdd">Add exercise</label>
-      <select id="rtAdd"><option value="">— pick —</option>
-        ${CATS.map(c => `<optgroup label="${esc(c.name)}">${
-          DB.exercises.filter(e => !e.arch && e.cat === c.id).sort((a, b) => a.ord - b.ord)
-            .map(e => `<option value="${e.id}">${esc(e.name)} · ${durLabel(e.dur)}</option>`).join("")}</optgroup>`).join("")}
-      </select></div>
-    <div class="btnrow">
-      <button class="btn sec" id="rtCancel">Cancel</button>
-      <button class="btn" id="rtSave">${isNew ? "Create" : "Save"}</button>
-    </div>
-    ${isNew ? "" : `<button class="btn danger" id="rtDel" style="margin-top:8px">Delete circuit</button>`}`, () => {
-    const paint = () => {
-      const rest = +$("rtRest").value || 0;
-      const objs = items.map(exById).filter(Boolean);
-      const total = objs.reduce((s, e) => s + (e.dur || 0), 0) + Math.max(0, objs.length - 1) * rest;
-      $("rtCount").textContent = objs.length ? `· ~${minsOf(total)} min` : "";
-      $("rtItems").innerHTML = objs.length ? objs.map((e, i) => `
-        <div class="exrow" style="cursor:default">
-          <div class="arttile" style="color:${catColor(e.cat)}">${art(e.art)}</div>
-          <div style="flex:1;min-width:0"><div class="t">${esc(e.name)}</div><div class="s">${durLabel(e.dur)}</div></div>
-          <button class="chip" data-up="${i}" ${i === 0 ? "disabled" : ""}>↑</button>
-          <button class="chip" data-dn="${i}" ${i === objs.length - 1 ? "disabled" : ""}>↓</button>
-          <button class="chip" data-rm="${i}">✕</button>
-        </div>`).join("") : `<div class="empty">Empty — add exercises below.</div>`;
-      $("rtItems").querySelectorAll("[data-up]").forEach(b => b.onclick = () => {
-        const i = +b.dataset.up; [items[i - 1], items[i]] = [items[i], items[i - 1]]; paint(); });
-      $("rtItems").querySelectorAll("[data-dn]").forEach(b => b.onclick = () => {
-        const i = +b.dataset.dn; [items[i + 1], items[i]] = [items[i], items[i + 1]]; paint(); });
-      $("rtItems").querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { items.splice(+b.dataset.rm, 1); paint(); });
-    };
-    paint();
-    $("rtRest").oninput = paint;
-    $("rtAdd").onchange = () => { if ($("rtAdd").value) { items.push($("rtAdd").value); $("rtAdd").value = ""; paint(); } };
-    $("rtCancel").onclick = closeSheet;
-    $("rtSave").onclick = () => {
-      const name = $("rtName").value.trim();
-      if (!name) { toast("Name it first", "err"); return; }
-      if (!items.length) { toast("Add at least one exercise", "err"); return; }
-      const patch = { name, rest: +$("rtRest").value || 0, items };
-      if (isNew) DB.routines.push(Object.assign({ id: uid("rt") }, patch));
-      else Object.assign(rt, patch);
-      save(true); closeSheet(); renderAll(); toast(isNew ? "Created" : "Saved");
-    };
-    if (!isNew) $("rtDel").onclick = () => {
-      snapshotForUndo("delete circuit");
-      DB.routines = DB.routines.filter(x => x.id !== rt.id);
-      save(true); closeSheet(); renderAll(); offerUndo(`Deleted ${rt.name}`);
-    };
-  });
-}
-
 function manualLog(exId) {
   openSheet(`
     <h3>Log a session</h3>
@@ -6588,7 +6523,6 @@ function boot() {
   $("goBody").onclick = openBody;
   $("bvBack").onclick = closeBody;
   $("bvSettings").onclick = () => { closeBody(); showTab("settings"); };
-  $("newChain").onclick = () => editRoutine(null);
   $("exSearch").oninput = e => { exQuery = e.target.value; renderExList(); };
 
   $("goalNew").onclick = () => editGoal(null);
