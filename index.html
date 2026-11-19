@@ -45,6 +45,9 @@
   header{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;
     margin:0 -16px 14px;padding:10px 16px;background:var(--bg);border-bottom:1px solid var(--line);}
   header h1{font-size:20px;margin:0;letter-spacing:.3px;display:flex;align-items:center;gap:8px;}
+  .btn:disabled{opacity:.4;cursor:default;}
+  #appTitle{cursor:pointer;-webkit-tap-highlight-color:transparent;}
+  #appTitle:active{opacity:.7;}
   header h1 img{width:22px;height:22px;display:block;}
   header .date{color:var(--muted);font-size:13px;}
   header .hdrright{display:flex;align-items:center;gap:10px;}
@@ -643,7 +646,7 @@
 
 <div class="wrap">
   <header>
-    <h1><img src="icon.svg" alt="">Anvil</h1>
+    <h1 id="appTitle" role="button" tabindex="0" title="Reload and sync"><img src="icon.svg" alt="">Anvil</h1>
     <span class="hdrright">
       <span class="date" id="hdrDate"></span>
       <button id="hdrSettings" class="hdrbtn" title="Settings" aria-label="Settings">
@@ -1023,7 +1026,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "38";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "39";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -6027,6 +6030,47 @@ function renderStreakCal() {
     + ` · now <b>${s.cur}${def.unit}</b> · best <b>${s.best}${def.unit}</b> · last ${lastTxt}`;
 }
 
+/* The name in the top bar opens this, as it does in Tally: which version is
+   running, when the sheet last heard from this phone, and the two buttons
+   that matter when a phone is stuck on an old deploy or an edit has not gone
+   out yet. */
+async function hardReload() {
+  try {
+    if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations())
+      if (r.scope === new URL("./", location.href).href) await r.unregister();
+    // only this app's caches: the other apps share the origin's cache storage
+    if (typeof caches !== "undefined") for (const k of await caches.keys())
+      if (k.startsWith("anvil-")) await caches.delete(k);
+  } catch (e) { /* nothing to clear */ }
+  location.reload();
+}
+function openAbout() {
+  const line = () => !syncConfigured() ? "Sync isn't set up — see Settings."
+    : DB.settings.syncedAt ? "Last pushed " + new Date(DB.settings.syncedAt).toLocaleString() : "Not pushed yet";
+  openSheet(`
+    <h3>Anvil</h3>
+    <div class="hint" style="margin-top:0">App v${APP_VERSION} · schema ${SCHEMA_VERSION}</div>
+    <div class="hint" id="abSync">${line()}</div>
+    <div class="btnrow" style="margin-top:12px">
+      <button class="btn sec" id="abReload">Hard reload</button>
+      <button class="btn" id="abSyncBtn"${syncConfigured() ? "" : " disabled"}>Sync</button>
+    </div>
+    <button class="btn sec" id="abClose" style="margin-top:8px">Close</button>`, () => {
+    $("abReload").onclick = hardReload;
+    $("abClose").onclick = closeSheet;
+    $("abSyncBtn").onclick = async () => {
+      $("abSyncBtn").disabled = true; $("abSync").textContent = "Pushing…";
+      const before = DB.settings.syncedAt;
+      await syncPush(false);
+      if ($("abSync")) {
+        $("abSync").textContent = DB.settings.syncedAt !== before ? line()
+          : (($("syncState") || {}).textContent || "Push failed");
+        $("abSyncBtn").disabled = false;
+      }
+    };
+  });
+}
+
 /* =====================================================================
    EDITORS AND PROMPTS
    ===================================================================== */
@@ -6515,6 +6559,8 @@ function boot() {
 
   $("nav").querySelectorAll("button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   $("hdrSettings").onclick = () => showTab(tab === "settings" ? "today" : "settings");
+  $("appTitle").onclick = openAbout;
+  $("appTitle").onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAbout(); } };
   // the + means "one more of what this tab is about"
   $("fab").onclick = () => (tab === "goals" ? editGoal(null) : newExercise());
   $("goExercises").onclick = () => showTab("ex");
