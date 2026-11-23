@@ -811,11 +811,6 @@
     </div>
 
     <div class="card">
-      <h2>Last week</h2>
-      <div id="reviewHist"></div>
-    </div>
-
-    <div class="card">
       <h2>Achievements</h2>
       <div id="badgeBox"></div>
     </div>
@@ -1039,7 +1034,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "40";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "41";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2773,14 +2768,23 @@ function insights(lastExport) {
   for (let i = 0; i < 120; i++) { if (!hardDay(ymd(addDays(today, -i)))) break; trainRun++; }
   if (trainRun >= 10) add("🛑", `${trainRun} days of hard training in a row. Recovery is when strength is actually built — a walk or a day off counts as training too.`, "warn");
 
-  // 6. this week against your own recent norm
-  let prior = 0;
-  for (let i = 1; i <= 4; i++) prior += weekSecs(ymd(addDays(fromYmd(wk), -7 * i)));
-  const avg = Math.round(prior / 4 / 60);
-  if (avg > 10) {
-    const diff = Math.round((mins - avg) / avg * 100);
-    if (diff <= -30) add("📉", `${mins} min this week vs a ${avg} min average — down ${-diff}%.`, "warn");
-    else if (diff >= 30) add("📈", `${mins} min this week vs a ${avg} min average — up ${diff}%.`, "good");
+  /* 6. this week against your own recent norm, like for like: only the days
+     already over, against the same days of the four weeks before. A whole week
+     against a Monday morning always reads as a collapse, so it waits until
+     Monday to Wednesday are behind you before saying anything. */
+  const doneDays = dowMon(today);                  // Monday up to yesterday
+  if (doneDays >= 3) {
+    const upTo = mon => { let t = 0; for (let i = 0; i < doneDays; i++) t += secsOn(ymd(addDays(fromYmd(mon), i))); return t; };
+    const so = Math.round(upTo(wk) / 60);
+    let prior = 0;
+    for (let i = 1; i <= 4; i++) prior += upTo(ymd(addDays(fromYmd(wk), -7 * i)));
+    const avg = Math.round(prior / 4 / 60);
+    const span = "Monday to " + addDays(today, -1).toLocaleDateString("en-US", { weekday: "long" });
+    if (avg > 10) {
+      const diff = Math.round((so - avg) / avg * 100);
+      if (diff <= -30) add("📉", `${so} min ${span} vs ${avg} min over the same days on average — down ${-diff}%.`, "warn");
+      else if (diff >= 30) add("📈", `${so} min ${span} vs ${avg} min over the same days on average — up ${diff}%.`, "good");
+    }
   }
 
   // 7. weight moving too fast — the only weight trend worth a tip; a normal
@@ -2883,13 +2887,19 @@ function insights(lastExport) {
      is the only failure here that cannot be trained back. It stays quiet below
      20 sessions (a fresh install has nothing to lose) and while a backup is
      recent, because a chore that reports success every day stops being read. */
+  const st = DB.settings || {};
+  const syncOn = !!(st.syncUrl && st.syncToken);
+  // a push to the sheet carries the whole DB, so it is as much a backup as an export
+  const synced = syncOn && st.syncedAt ? ymd(new Date(st.syncedAt)) : "";
+  const lastBackup = [lastExport || "", synced].sort().pop();
   if (DB.logs.length >= EXPORT_MIN_LOGS) {
-    const days = lastExport ? Math.round((today - fromYmd(lastExport)) / 86400000) : -1;
-    const since = lastExport ? DB.logs.filter(l => l.date > lastExport).length : DB.logs.length;
+    const days = lastBackup ? Math.round((today - fromYmd(lastBackup)) / 86400000) : -1;
+    const since = lastBackup ? DB.logs.filter(l => l.date > lastBackup).length : DB.logs.length;
     if (days < 0)
       add("💾", `${DB.logs.length} sessions on this device and no backup yet. Export writes one file you can keep anywhere.`, "warn", "export");
     else if (days >= EXPORT_NAG_DAYS)
-      add("💾", `Last backup was ${days} days ago${since ? `, ${since} session${since === 1 ? "" : "s"} back` : ""}. Another export is one tap.`, "warn", "export");
+      add("💾", `Last backup was ${days} days ago${since ? `, ${since} session${since === 1 ? "" : "s"} back` : ""}. ${
+        syncOn ? "Sync hasn't pushed since — check Settings → Spreadsheet sync." : "Another export is one tap."}`, "warn", "export");
   }
   return out;
 }
@@ -5099,45 +5109,6 @@ function measureChart(map, from, to, o) {
 }
 
 /* ---------- WEEKLY REVIEW ---------- */
-function weekReviewHTML(mondayKey) {
-  const from = mondayKey, to = ymd(addDays(fromYmd(mondayKey), 6));
-  const rows = logsBetween(from, to);
-  const secs = sumSecs(rows), goal = weekGoalMin(mondayKey);
-  const prevKey = ymd(addDays(fromYmd(mondayKey), -7));
-  const prevSecs = weekSecs(prevKey);
-  const days = activeDays(from, to);
-  const cats = new Set(rows.map(l => l.cat));
-  const byEx = {};
-  rows.forEach(l => { const k = l.exId || l.name; byEx[k] = (byEx[k] || 0) + l.secs; });
-  const top = Object.keys(byEx).sort((a, b) => byEx[b] - byEx[a])[0];
-  const topName = top ? (rows.find(l => (l.exId || l.name) === top) || {}).name : null;
-  const wStart = weightKeys().filter(k => k <= from).pop();
-  const wEnd = weightKeys().filter(k => k <= to).pop();
-  const dw = (wStart && wEnd && wStart !== wEnd) ? DB.weights[wEnd] - DB.weights[wStart] : null;
-  const diff = prevSecs > 0 ? Math.round((secs - prevSecs) / prevSecs * 100) : null;
-
-  if (!rows.length) return `<div class="empty">Nothing logged that week.</div>`;
-  return `
-    <div class="streakrow">
-      <div class="stat"><div class="n">${minsOf(secs)}${goal > 0 ? `<small>/${Math.round(goal)}</small>` : ""}</div><div class="l">Minutes</div></div>
-      <div class="stat"><div class="n">${days}<small>/7</small></div><div class="l">Days</div></div>
-      <div class="stat"><div class="n">${canEstimateKcal() ? Math.round(kcalOfLogs(rows)) : "—"}</div><div class="l">kcal</div></div>
-    </div>
-    ${/* a week with no goal in force was never judged, and "hit" would be a lie */""}
-    ${goal > 0 ? `<div class="kv" style="margin-top:10px"><span>Weekly goal</span>
-      <b style="color:${secs / 60 >= goal ? "var(--good)" : "var(--warn)"}">${
-        secs / 60 >= goal ? "hit 🏆" : `${Math.max(0, Math.ceil(goal - secs / 60))} min short`}</b></div>`
-      : `<div class="kv" style="margin-top:10px"><span>Weekly goal</span><b>none that week</b></div>`}
-    ${diff != null ? `<div class="kv"><span>vs the week before</span>
-      <b style="color:${diff >= 0 ? "var(--good)" : "var(--warn)"}">${diff >= 0 ? "+" : ""}${diff}%</b></div>` : ""}
-    <div class="kv"><span>Sessions</span><b>${rows.length}</b></div>
-    ${topName ? `<div class="kv"><span>Most time on</span><b>${esc(topName)}</b></div>` : ""}
-    <div class="kv"><span>Categories touched</span><b>${cats.size} of ${CATS.length}</b></div>
-    ${volumeOfLogs(rows) > 0 ? `<div class="kv"><span>Volume lifted</span><b>${Math.round(volumeOfLogs(rows))} kg</b></div>` : ""}
-    ${dw != null ? `<div class="kv"><span>Weight change</span>
-      <b style="color:${dw <= 0 ? "var(--good)" : "var(--warn)"}">${dw > 0 ? "+" : ""}${fmtW(dw)}</b></div>` : ""}`;
-}
-
 /* ---------- ACHIEVEMENTS + INSIGHTS ---------- */
 function renderBadges(elId, compact) {
   const st = badgeState();
@@ -5546,7 +5517,6 @@ function renderHistory() {
     let c = fromYmd(firstK); const end = midnight();
     while (c <= end) { const i = dowMon(c); sums[i] += secsOn(ymd(c)); counts[i]++; c = addDays(c, 1); }
   }
-  $("reviewHist").innerHTML = weekReviewHTML(ymd(addDays(fromYmd(weekKeyOf(new Date())), -7)));
   renderBadges("badgeBox", false);
 
   const avgs = sums.map((s, i) => counts[i] ? s / counts[i] / 60 : 0);
@@ -6515,12 +6485,15 @@ function syncAutoPush() {
 function paintExportState() {
   const el = $("expState"); if (!el) return;
   const day = lastExportDay();
-  if (!day) { el.textContent = `No backup from this device yet — ${DB.logs.length} sessions to lose.`; return; }
+  const sAt = syncConfigured() && DB.settings.syncedAt ? ymd(new Date(DB.settings.syncedAt)) : "";
+  const sync = sAt ? ` Synced to the sheet ${shortDate(sAt)}.` : "";
+  if (!day) { el.textContent = sAt ? `No export from this device, but it syncs to the sheet — last pushed ${shortDate(sAt)}.`
+    : `No backup from this device yet — ${DB.logs.length} sessions to lose.`; return; }
   const days = Math.round((midnight() - fromYmd(day)) / 86400000);
   const since = DB.logs.filter(l => l.date > day).length;
   el.textContent = `Last export from this device: ${shortDate(day)}`
     + (days <= 0 ? " (today)." : ` — ${days} day${days === 1 ? "" : "s"} ago.`)
-    + (since ? ` ${since} session${since === 1 ? "" : "s"} since.` : "");
+    + (since ? ` ${since} session${since === 1 ? "" : "s"} since.` : "") + sync;
 }
 function renderSettings() {
   const s = DB.settings, pr = DB.profile;
