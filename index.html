@@ -222,6 +222,14 @@
   .calhead .mlab{font-weight:700;font-size:16px;}
   .calhead button{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);
     background:var(--card2);color:var(--txt);font-size:18px;cursor:pointer;}
+  .wkg{display:grid;grid-template-columns:1fr auto auto auto;align-items:center;gap:8px;padding:7px 0;
+    border-top:1px solid var(--line);font-size:14px;}
+  .wkg .wn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .wkg .wm{font-size:18px;width:24px;text-align:center;}
+  .wkg .wv{color:var(--muted);font-size:12.5px;white-space:nowrap;}
+  .wkg .wke{background:none;border:1px solid var(--line);color:var(--muted);border-radius:8px;
+    width:30px;height:30px;cursor:pointer;font-size:14px;}
+  .wkgoals{margin:12px 0;}
   .calhead button:disabled{opacity:.35;cursor:default}
   .calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
   .calgrid .dow{text-align:center;color:var(--muted);font-size:11px;padding-bottom:4px;}
@@ -722,8 +730,13 @@
       <div class="callegend" id="calLegend"></div>
     </div>
     <!-- the weekly review belongs next to the month it sits inside, not on Today -->
-    <div class="card" id="reviewCard">
-      <h2>Last week <span class="act" id="goReview">history ›</span></h2>
+    <div class="card hide" id="reviewCard">
+      <h2><span id="revTitle">Last week</span> <span class="act" id="goReview">history ›</span></h2>
+      <div class="calhead">
+        <button id="revPrev" aria-label="Previous week">‹</button>
+        <span class="mlab" id="revLab"></span>
+        <button id="revNext" aria-label="Next week">›</button>
+      </div>
       <div id="reviewToday"></div>
     </div>
     <div class="card">
@@ -1026,7 +1039,7 @@
 
 <script>
 "use strict";
-const APP_VERSION = "39";          // keep equal to CACHE in sw.js; bump every change
+const APP_VERSION = "40";          // keep equal to CACHE in sw.js; bump every change
 const SCHEMA_VERSION = 7;
 const LSKEY = "anvil.db";
 
@@ -2972,6 +2985,28 @@ const goalHasTier = (t, k) => !t ? false
    targets, so flipping it applies from this week on and earlier weeks keep the
    verdict they were given. */
 const goalIsBonus = (g, wk) => !!(goalRev(g, wk) || {}).bonus;
+/* Change a goal for one week only, from the Calendar's week card. The new
+   numbers go in at that week and the week after gets back whatever it had
+   before, so no other week moves. A revision that only repeats the one before
+   it is dropped, so editing three weeks in a row leaves one revision, not six. */
+function goalSetWeekRev(g, wk, nr) {
+  const next = ymd(addDays(fromYmd(wk), 7));
+  const after = goalRev(g, next);
+  const revs = (g.revs || []).filter(r => r.from !== wk);
+  if (!revs.some(r => r.from === next))
+    revs.push(Object.assign({}, after || { target: 0, silver: 0, gold: 0 }, { from: next }));
+  revs.push(Object.assign({}, nr, { from: wk }));
+  revs.sort((a, b) => a.from < b.from ? -1 : 1);
+  const same = (a, b) => (a.target || 0) === (b.target || 0) && (a.silver || 0) === (b.silver || 0)
+    && (a.gold || 0) === (b.gold || 0) && !!a.bonus === !!b.bonus;
+  g.revs = revs.filter((r, i) => i === 0 || !same(r, revs[i - 1]));
+  return g;
+}
+// the mean of a date-keyed map (weights, waists) over a span, or null if it has none
+const avgOver = (map, from, to) => {
+  const v = Object.keys(map || {}).filter(k => k >= from && k <= to).map(k => map[k]).filter(x => x > 0);
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
 
 /* Which exercises count. `all` tracks the whole library, a category tracks
    itself as it grows, and exIds pin individual ones — the union of the three,
@@ -5241,12 +5276,109 @@ function renderCal() {
   // fixed review of what you just did, so paging the calendar back does not rewrite
   // it. No day-of-week gate any more either: the old one existed to stop it
   // crowding Today, and on a page you open to look back there is nothing to crowd.
-  const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
-  const hasLast = !!logsBetween(lastMon, ymd(addDays(fromYmd(lastMon), 6))).length;
-  $("reviewCard").classList.toggle("hide", !hasLast);
-  if (hasLast) $("reviewToday").innerHTML = weekReviewHTML(lastMon);
+  renderWeekReview();
 
   $("calCats").innerHTML = catBreakdown(logsBetween(from, to));
+}
+
+/* The Calendar's week card: last week by default, paged back with ‹ to any
+   week since the first log. Each goal shows the medal it won that week and a
+   ✎ that changes that goal for that week alone (goalSetWeekRev). */
+let revWk = null;                 // the Monday on show; null means last week
+function renderWeekReview() {
+  const lastMon = ymd(addDays(fromYmd(weekKeyOf(new Date())), -7));
+  const first = firstLogDate();
+  const show = !!first && first <= ymd(addDays(fromYmd(lastMon), 6));
+  $("reviewCard").classList.toggle("hide", !show);
+  if (!show) return;
+  const minWk = weekKeyOf(fromYmd(first));
+  if (!revWk || revWk > lastMon) revWk = lastMon;
+  if (revWk < minWk) revWk = minWk;
+  const wk = revWk;
+  const ago = Math.round((fromYmd(lastMon) - fromYmd(wk)) / (7 * 86400000)) + 1;
+  $("revTitle").textContent = ago === 1 ? "Last week" : ago + " weeks ago";
+  const wm = weekMedal(wk);
+  $("revLab").textContent = (wm ? MEDAL[wm].ic + " " : "")
+    + fromYmd(wk).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  $("revPrev").disabled = wk <= minWk;
+  $("revNext").disabled = wk >= lastMon;
+  $("reviewToday").innerHTML = weekCardHTML(wk);
+  $("reviewToday").querySelectorAll("[data-wkedit]").forEach(b => b.onclick = () => {
+    const g = DB.goals.find(x => x.id === b.dataset.wkedit);
+    if (g) editGoalWeek(g, wk);
+  });
+}
+function weekCardHTML(wk) {
+  const to = ymd(addDays(fromYmd(wk), 6));
+  const rows = logsBetween(wk, to);
+  const secs = sumSecs(rows), goal = weekGoalMin(wk);
+  const stat = (n, l) => `<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+  const goals = goalsInWeek(wk).slice().sort((a, b) => goalIsBonus(a, wk) - goalIsBonus(b, wk));
+  const gl = goals.map(g => {
+    const t = goalTiers(goalRev(g, wk)), v = goalWeekVal(g, DB.exercises, DB.logs, wk);
+    const m = goalMedalOf(v, t);
+    return `<div class="wkg"><span class="wn">${esc(g.ic || "🎯")} ${esc(g.name)}${
+        goalIsBonus(g, wk) ? ` <span class="gbonus">bonus</span>` : ""}</span>
+      <span class="wm">${m ? MEDAL[m].ic : "—"}</span>
+      <span class="wv">${goalFmt(g, goalFloor(g, v))} / ${goalFmt(g, t.bronze)}</span>
+      <button class="wke" data-wkedit="${g.id}" aria-label="Edit ${esc(g.name)} for this week">✎</button></div>`;
+  }).join("");
+  const byId = Object.fromEntries(DB.exercises.map(e => [e.id, e]));
+  const km = rows.reduce((t, l) => t + EX_METRICS.dist.of(l, byId[l.exId] || {}), 0);
+  const vol = volumeOfLogs(rows);
+  const aw = avgOver(DB.weights, wk, to), aws = avgOver(DB.waists, wk, to);
+  const one = x => (Math.round(x * 10) / 10).toFixed(1);
+  return `
+    <div class="streakrow">
+      ${stat(minsOf(secs) + (goal > 0 ? `<small>/${Math.round(goal)}</small>` : ""), "Minutes")}
+      ${stat(activeDays(wk, to) + "<small>/7</small>", "Days")}
+      ${stat(canEstimateKcal() ? Math.round(kcalOfLogs(rows)) : "—", "kcal")}
+    </div>
+    <div class="wkgoals">${gl || `<div class="empty">No goals that week.</div>`}</div>
+    <div class="streakrow">
+      ${stat(vol > 0 ? EX_METRICS.vol.fmt(vol) : "—", "Volume lifted")}
+      ${stat(km > 0 ? fmtDist(km) : "—", "Distance")}
+    </div>
+    <div class="streakrow" style="margin-top:10px">
+      ${stat(aw ? one(toDisplayW(aw)) + `<small>${wUnit()}</small>` : "—", "Weight avg")}
+      ${stat(aws ? one(toDisplayL(aws)) + `<small>${lUnit()}</small>` : "—", "Waist avg")}
+    </div>`;
+}
+// one goal, one week: the targets and the bonus switch, nothing that belongs to the goal as a whole
+function editGoalWeek(g, wk) {
+  const rev = goalRev(g, wk) || {};
+  const cur = k => goalToInput(g, rev[k] || 0);
+  const when = fromYmd(wk).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const u = goalUnit(g);
+  openSheet(`
+    <h3>${esc(g.ic || "🎯")} ${esc(g.name)}</h3>
+    <div class="hint" style="margin-top:0">Week of ${esc(when)} only. Every other week keeps its own targets.</div>
+    <div class="field" style="margin-top:12px"><label>Targets (${u})</label>
+      <div class="tierrow">
+        <div class="field"><label for="wgT" style="font-size:11px">🥉 bronze</label>
+          <input type="number" id="wgT" min="0" step="1" value="${cur("target")}"></div>
+        <div class="field"><label for="wgS" style="font-size:11px">🥈 silver +</label>
+          <input type="number" id="wgS" min="0" step="1" value="${cur("silver")}"></div>
+        <div class="field"><label for="wgG" style="font-size:11px">🥇 gold +</label>
+          <input type="number" id="wgG" min="0" step="1" value="${cur("gold")}"></div>
+      </div></div>
+    <div class="field toggle"><span>Bonus goal<br><small class="muted">That week's medal ignores it</small></span>
+      <label class="switch"><input type="checkbox" id="wgBonus" ${rev.bonus ? "checked" : ""}><span class="sl"></span></label></div>
+    <div class="btnrow">
+      <button class="btn sec" id="wgCancel">Cancel</button>
+      <button class="btn" id="wgSave">Save</button>
+    </div>`, () => {
+    $("wgCancel").onclick = closeSheet;
+    $("wgSave").onclick = () => {
+      const t = +$("wgT").value || 0;
+      if (!(t > 0)) { toast("Bronze needs a number", "err"); return; }
+      const nr = { target: goalFromInput(g, t), silver: goalFromInput(g, +$("wgS").value || 0),
+                   gold: goalFromInput(g, +$("wgG").value || 0) };
+      if ($("wgBonus").checked) nr.bonus = true;
+      goalSetWeekRev(g, wk, nr);
+      save(true); closeSheet(); renderAll(); toast("Saved for the week of " + when);
+    };
+  });
 }
 
 let dmKey = null;
@@ -6565,6 +6697,8 @@ function boot() {
   $("fab").onclick = () => (tab === "goals" ? editGoal(null) : newExercise());
   $("goExercises").onclick = () => showTab("ex");
   $("goReview").onclick = () => showTab("history");
+  $("revPrev").onclick = () => { revWk = ymd(addDays(fromYmd(revWk), -7)); renderWeekReview(); };
+  $("revNext").onclick = () => { revWk = ymd(addDays(fromYmd(revWk), 7)); renderWeekReview(); };
   $("editToday").onclick = () => openDayEdit(todayStr());
   $("goBody").onclick = openBody;
   $("bvBack").onclick = closeBody;
